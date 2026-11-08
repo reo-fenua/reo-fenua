@@ -1028,12 +1028,13 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
     LaunchedEffect(Unit) { ReoFenuaUpdate.checkInBackground() }
     val newVersion = ReoFenuaUpdate.available.value
     // Bandeau « position partagée » en haut, au centre
+    // Sous la pastille « Mode » (et la pastille « Mise à jour ») pour ne jamais les chevaucher
     ReoFenuaLocationBanner(
         viewModel = viewModel,
         modifier = Modifier
             .align(Alignment.TopCenter)
-            .zIndex(10f)
-            .padding(top = topPadding)
+            .zIndex(9f)
+            .padding(top = topPadding + 58.dp, start = 12.dp, end = 12.dp)
     )
     // Pastille « Mode » bien visible, en haut à droite
     ReoFenuaModePill(
@@ -6775,12 +6776,12 @@ fun ReoFenuaModePill(modifier: Modifier = Modifier) {
             .semantics { contentDescription = "Mode $label. Toucher pour changer de mode" }
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Text(text = icon, fontSize = 16.sp)
-            Text(text = "Mode $label", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(text = icon, fontSize = 14.sp)
+            Text(text = "Mode $label", fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Text(text = "▾", fontSize = 13.sp)
         }
     }
