@@ -1042,34 +1042,36 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
             .zIndex(10f)
             .padding(top = topPadding + 6.dp, end = 10.dp)
     )
-    // Bandeau « Nouvelle version » bien visible en haut, seulement quand une mise à jour existe
+    // Petite pastille « Mise à jour » en haut à gauche, seulement quand une mise à jour existe
     if (newVersion != null && !ReoFenuaUpdate.bannerHidden.value) {
         Surface(
             color = Lagon,
-            shape = RoundedCornerShape(20.dp),
-            shadowElevation = 6.dp,
+            contentColor = Color.White,
+            shape = RoundedCornerShape(50),
+            shadowElevation = 4.dp,
             modifier = Modifier
-                .align(Alignment.TopCenter)
+                .align(Alignment.TopStart)
                 .zIndex(11f)
-                .padding(top = topPadding + 60.dp, start = 12.dp, end = 12.dp)
-                .fillMaxWidth()
+                .padding(top = topPadding + 6.dp, start = 10.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Nouvelle version disponible", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "Améliorations et corrections", fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
-                }
-                Button(
-                    onClick = { ReoFenuaUpdateDialog.show.value = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Lagon),
-                    modifier = Modifier.heightIn(min = 44.dp)
-                ) { Text(text = "Mettre à jour", fontSize = 15.sp, fontWeight = FontWeight.Bold) }
-                TextButton(onClick = { ReoFenuaUpdate.bannerHidden.value = true }) {
-                    Text(text = "Plus tard", fontSize = 13.sp, color = Color.White)
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "⬇ Mise à jour",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .clickable { ReoFenuaUpdateDialog.show.value = true }
+                        .padding(start = 14.dp, end = 6.dp, top = 9.dp, bottom = 9.dp)
+                )
+                Text(
+                    text = "✕",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .clickable { ReoFenuaUpdate.bannerHidden.value = true }
+                        .padding(start = 4.dp, end = 12.dp, top = 9.dp, bottom = 9.dp)
+                )
             }
         }
     }
@@ -1129,6 +1131,12 @@ fun BoxScope.ReoFenuaWallpaperLayer() {
     val context = LocalContext.current
     LaunchedEffect(Unit) { ReoFenuaWallpaper.load(context) }
     val choice = ReoFenuaWallpaper.choice.value
+    ReoFenuaStyle.load(context)
+    val reoTheme = ReoFenuaStyle.theme.value
+    if (reoTheme != null && choice != 4) {
+        ReoFenuaThemedBackdrop(reoTheme)
+        return
+    }
     if (choice <= 0) return
 
     if (choice == 4) {
@@ -6504,6 +6512,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -6519,7 +6528,10 @@ import com.bitchat.android.R
 enum class ReoTheme(val id: String, val label: String, val sub: String, val dark: Boolean) {
     PO("po", "Pō", "nuit étoilée", true),
     MAHANA("mahana", "Mahana", "coucher de soleil", false),
-    TIFAIFAI("tifaifai", "Tīfaifai", "rouge et blanc", false);
+    TIFAIFAI("tifaifai", "Tīfaifai", "rouge et blanc", false),
+    MOUA("moua", "Mou'a", "montagne", false),
+    SURF("surf", "Surf", "la vague", false),
+    MOANA("moana", "Moana", "sous l'océan", true);
 
     val scheme: ColorScheme
         get() = when (this) {
@@ -6541,8 +6553,8 @@ enum class ReoTheme(val id: String, val label: String, val sub: String, val dark
                 secondary = Color(0xFF7A2E1E), onSecondary = Color.White,
                 secondaryContainer = Color(0xFFFFE9C9), onSecondaryContainer = Color(0xFF3B1A10),
                 tertiary = Color(0xFFE8A33A), onTertiary = Color(0xFF2B1600),
-                background = Color(0xFFFFF3E8), onBackground = Color(0xFF3B1A10),
-                surface = Color(0xFFFFFFFF), onSurface = Color(0xFF3B1A10),
+                background = Color(0xFFFFE9D6), onBackground = Color(0xFF3B1A10),
+                surface = Color(0xFFFFF6EC), onSurface = Color(0xFF3B1A10),
                 surfaceVariant = Color(0xFFFFE3D2), onSurfaceVariant = Color(0xFF6E3A28),
                 outline = Color(0xFFF0B593), outlineVariant = Color(0xFFF8D6C2),
                 error = Color(0xFFB3261E), onError = Color.White
@@ -6559,6 +6571,42 @@ enum class ReoTheme(val id: String, val label: String, val sub: String, val dark
                 outline = Color(0xFFE7A6AE), outlineVariant = Color(0xFFF3D3D7),
                 error = Color(0xFF8E0B21), onError = Color.White
             )
+            MOUA -> lightColorScheme(
+                primary = Color(0xFF2E7D32), onPrimary = Color.White,
+                primaryContainer = Color(0xFFCDE8C4), onPrimaryContainer = Color(0xFF0F2E12),
+                secondary = Color(0xFF4E6B3A), onSecondary = Color.White,
+                secondaryContainer = Color(0xFFE2EFD6), onSecondaryContainer = Color(0xFF1B2A12),
+                tertiary = Color(0xFF8D6E63), onTertiary = Color.White,
+                background = Color(0xFFEAF4E4), onBackground = Color(0xFF14261A),
+                surface = Color(0xFFF6FBF2), onSurface = Color(0xFF14261A),
+                surfaceVariant = Color(0xFFDCEBD3), onSurfaceVariant = Color(0xFF3F5A44),
+                outline = Color(0xFFA7C49B), outlineVariant = Color(0xFFCADDBF),
+                error = Color(0xFFB3261E), onError = Color.White
+            )
+            SURF -> lightColorScheme(
+                primary = Color(0xFF0077B6), onPrimary = Color.White,
+                primaryContainer = Color(0xFFCDEBFA), onPrimaryContainer = Color(0xFF002B44),
+                secondary = Color(0xFFF2A900), onSecondary = Color(0xFF2B1A00),
+                secondaryContainer = Color(0xFFFFE9A8), onSecondaryContainer = Color(0xFF2B1A00),
+                tertiary = Color(0xFF00A6A6), onTertiary = Color.White,
+                background = Color(0xFFE3F4FB), onBackground = Color(0xFF062B42),
+                surface = Color(0xFFF4FBFE), onSurface = Color(0xFF062B42),
+                surfaceVariant = Color(0xFFD2EBF5), onSurfaceVariant = Color(0xFF2F5568),
+                outline = Color(0xFF9CCBDD), outlineVariant = Color(0xFFC6E3EE),
+                error = Color(0xFFB3261E), onError = Color.White
+            )
+            MOANA -> darkColorScheme(
+                primary = Color(0xFF4FD1C5), onPrimary = Color(0xFF002B2A),
+                primaryContainer = Color(0xFF0A4A5C), onPrimaryContainer = Color(0xFFCFF7F3),
+                secondary = Color(0xFFFF9E80), onSecondary = Color(0xFF3A0F00),
+                secondaryContainer = Color(0xFF0B3A52), onSecondaryContainer = Color(0xFFDDF3F8),
+                tertiary = Color(0xFFFFD166), onTertiary = Color(0xFF2B1D00),
+                background = Color(0xFF032B44), onBackground = Color(0xFFE2F6FA),
+                surface = Color(0xFF07385A), onSurface = Color(0xFFE2F6FA),
+                surfaceVariant = Color(0xFF0B4468), onSurfaceVariant = Color(0xFF9CCADB),
+                outline = Color(0xFF2A6A8C), outlineVariant = Color(0xFF15506F),
+                error = Color(0xFFFF8A8A), onError = Color.Black
+            )
         }
 
     val swatch: Brush
@@ -6566,6 +6614,9 @@ enum class ReoTheme(val id: String, val label: String, val sub: String, val dark
             PO -> Brush.linearGradient(listOf(Color(0xFF071A2B), Color(0xFF16365A)))
             MAHANA -> Brush.linearGradient(listOf(Color(0xFFE8735A), Color(0xFFFBE07A)))
             TIFAIFAI -> Brush.linearGradient(listOf(Color(0xFFC8102E), Color(0xFF8E0B21)))
+            MOUA -> Brush.linearGradient(listOf(Color(0xFF2E7D32), Color(0xFF7CB342)))
+            SURF -> Brush.linearGradient(listOf(Color(0xFF0077B6), Color(0xFF48CAE4)))
+            MOANA -> Brush.linearGradient(listOf(Color(0xFF032B44), Color(0xFF0A6E8A)))
         }
     val swatchText: Color get() = if (this == MAHANA) Color(0xFF3B1A10) else Color.White
 }
@@ -6639,8 +6690,9 @@ fun ReoFenuaStyleSetting() {
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            ReoTheme.values().toList().chunked(3).forEach { rowThemes ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                ReoTheme.values().forEach { t ->
+                rowThemes.forEach { t ->
                     val sel = current == t
                     Box(
                         modifier = Modifier
@@ -6659,6 +6711,7 @@ fun ReoFenuaStyleSetting() {
                         }
                     }
                 }
+            }
             }
             Box(
                 modifier = Modifier
@@ -6820,8 +6873,9 @@ private fun ReoFenuaModeSheetDialog() {
                             else if (current != ReoModeKind.STYLISE) { applyMode(context, ReoModeKind.STYLISE); close() }
                         }
                         if (current == ReoModeKind.STYLISE) {
+                            ReoTheme.values().toList().chunked(3).forEach { rowThemes ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                ReoTheme.values().forEach { t ->
+                                rowThemes.forEach { t ->
                                     val sel = ReoFenuaStyle.theme.value == t
                                     Box(
                                         modifier = Modifier
@@ -6834,6 +6888,7 @@ private fun ReoFenuaModeSheetDialog() {
                                         contentAlignment = Alignment.Center
                                     ) { Text(text = t.label, color = t.swatchText, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
                                 }
+                            }
                             }
                         }
                         androidx.compose.material3.TextButton(onClick = close, modifier = Modifier.fillMaxWidth()) {
@@ -6863,6 +6918,181 @@ private fun ModeCard(emoji: String, title: String, body: String, selected: Boole
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = title + if (selected) "  ✓ actuel" else "", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = fg)
                 Text(text = body, fontSize = 14.sp, color = fg.copy(alpha = 0.85f))
+            }
+        }
+    }
+}
+
+// ===================== Décor de fond propre à chaque thème =====================
+
+/** Dessin de fond du thème stylisé, derrière les messages (remplace le fond d'écran dessiné). */
+@Composable
+fun androidx.compose.foundation.layout.BoxScope.ReoFenuaThemedBackdrop(theme: ReoTheme) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.matchParentSize()) {
+        val w = size.width
+        val h = size.height
+        when (theme) {
+            ReoTheme.PO -> {
+                // Nuit étoilée, lune et reflets sur le lagon
+                drawRect(Brush.verticalGradient(listOf(Color(0xFF040F1C), Color(0xFF0B2A44))))
+                val rnd = java.util.Random(7)
+                repeat(70) {
+                    val x = rnd.nextFloat() * w
+                    val y = rnd.nextFloat() * h * 0.7f
+                    val r = 1f + rnd.nextFloat() * 2.4f
+                    val c = if (it % 7 == 0) Color(0xFF5FF2E6) else if (it % 5 == 0) Color(0xFFFFE29A) else Color.White
+                    drawCircle(c.copy(alpha = 0.35f + rnd.nextFloat() * 0.45f), r, androidx.compose.ui.geometry.Offset(x, y))
+                }
+                drawCircle(Color(0xFFFFF4D0).copy(alpha = 0.85f), w * 0.07f, androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.16f))
+                drawCircle(Color(0xFF040F1C), w * 0.065f, androidx.compose.ui.geometry.Offset(w * 0.81f, h * 0.15f))
+                drawRect(Color(0xFF0E7C86).copy(alpha = 0.18f), topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.8f), size = androidx.compose.ui.geometry.Size(w, h * 0.2f))
+                for (i in 0 until 6) {
+                    val y = h * (0.83f + i * 0.028f)
+                    drawLine(Color(0xFF5FF2E6).copy(alpha = 0.12f), androidx.compose.ui.geometry.Offset(w * 0.6f - i * 12f, y), androidx.compose.ui.geometry.Offset(w * 0.96f + i * 6f, y), strokeWidth = 3f)
+                }
+            }
+            ReoTheme.MAHANA -> {
+                // Coucher de soleil : ciel orange, grand soleil sur l'horizon, cocotiers
+                drawRect(Brush.verticalGradient(listOf(Color(0xFFFFB38A), Color(0xFFFFD89A), Color(0xFFFFF0DC))))
+                val horizon = h * 0.78f
+                drawCircle(Color(0xFFFFE07A).copy(alpha = 0.9f), w * 0.2f, androidx.compose.ui.geometry.Offset(w * 0.5f, horizon))
+                drawRect(Brush.verticalGradient(listOf(Color(0xFFE8735A), Color(0xFFB8503A)), startY = horizon, endY = h),
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, horizon), size = androidx.compose.ui.geometry.Size(w, h - horizon))
+                for (i in 0 until 5) {
+                    val y = horizon + (h - horizon) * (0.15f + i * 0.17f)
+                    val half = w * (0.16f - i * 0.025f)
+                    drawLine(Color(0xFFFFE07A).copy(alpha = 0.55f), androidx.compose.ui.geometry.Offset(w * 0.5f - half, y), androidx.compose.ui.geometry.Offset(w * 0.5f + half, y), strokeWidth = 5f)
+                }
+                fun palm(x: Float, base: Float, s: Float) {
+                    val trunk = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(x, base); quadraticTo(x + 18f * s, base - 120f * s, x + 6f * s, base - 220f * s)
+                    }
+                    drawPath(trunk, Color(0xFF5A2A1E), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 12f * s))
+                    val top = androidx.compose.ui.geometry.Offset(x + 6f * s, base - 220f * s)
+                    listOf(-160f, -120f, -60f, -20f, 20f, 200f).forEach { a ->
+                        val rad = Math.toRadians(a.toDouble())
+                        val end = androidx.compose.ui.geometry.Offset(top.x + (110f * s * Math.cos(rad)).toFloat(), top.y + (110f * s * Math.sin(rad)).toFloat() + 40f * s)
+                        val leaf = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(top.x, top.y); quadraticTo((top.x + end.x) / 2f, top.y - 30f * s, end.x, end.y)
+                        }
+                        drawPath(leaf, Color(0xFF5A2A1E), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 9f * s))
+                    }
+                }
+                palm(w * 0.1f, horizon + 4f, w / 1100f * 1.4f)
+                palm(w * 0.86f, horizon + 4f, w / 1100f * 1.1f)
+                // voile clair pour garder les messages lisibles
+                drawRect(Color.White.copy(alpha = 0.28f))
+            }
+            ReoTheme.MOUA -> {
+                // Montagne : pics verts de Tahiti, brume et cascade
+                drawRect(Brush.verticalGradient(listOf(Color(0xFFCFE7F0), Color(0xFFEAF4E4))))
+                fun range(base: Float, amp: Float, col: Color, seed: Int) {
+                    val r = java.util.Random(seed.toLong())
+                    val p = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(0f, h)
+                        lineTo(0f, base)
+                        var x = 0f
+                        while (x < w) {
+                            val nx = x + w * (0.08f + r.nextFloat() * 0.1f)
+                            val peak = base - amp * (0.4f + r.nextFloat() * 0.6f)
+                            lineTo((x + nx) / 2f, peak)
+                            lineTo(nx, base - amp * 0.15f * r.nextFloat())
+                            x = nx
+                        }
+                        lineTo(w, h); close()
+                    }
+                    drawPath(p, col)
+                }
+                range(h * 0.6f, h * 0.28f, Color(0xFF7CB342).copy(alpha = 0.35f), 3)
+                range(h * 0.72f, h * 0.22f, Color(0xFF4E8C3A).copy(alpha = 0.45f), 11)
+                drawRect(Color.White.copy(alpha = 0.35f), topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.58f), size = androidx.compose.ui.geometry.Size(w, h * 0.05f))
+                drawRect(Brush.verticalGradient(listOf(Color(0xFFE3F4FB).copy(alpha = 0.9f), Color(0xFFBFE6F2).copy(alpha = 0.7f))),
+                    topLeft = androidx.compose.ui.geometry.Offset(w * 0.64f, h * 0.55f), size = androidx.compose.ui.geometry.Size(w * 0.025f, h * 0.3f))
+                range(h * 0.86f, h * 0.1f, Color(0xFF2E7D32).copy(alpha = 0.55f), 23)
+                drawRect(Color.White.copy(alpha = 0.22f))
+            }
+            ReoTheme.SURF -> {
+                // Surf : grande vague qui déroule, planche, soleil
+                drawRect(Brush.verticalGradient(listOf(Color(0xFFBDE6F6), Color(0xFFE3F4FB))))
+                drawCircle(Color(0xFFFFE07A).copy(alpha = 0.8f), w * 0.09f, androidx.compose.ui.geometry.Offset(w * 0.2f, h * 0.14f))
+                val wave = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(0f, h * 0.9f)
+                    cubicTo(w * 0.15f, h * 0.55f, w * 0.55f, h * 0.42f, w * 0.82f, h * 0.5f)
+                    cubicTo(w * 0.98f, h * 0.55f, w * 0.96f, h * 0.68f, w * 0.84f, h * 0.68f)
+                    cubicTo(w * 0.76f, h * 0.68f, w * 0.74f, h * 0.6f, w * 0.8f, h * 0.58f)
+                    cubicTo(w * 0.6f, h * 0.58f, w * 0.45f, h * 0.75f, w * 0.38f, h)
+                    lineTo(0f, h); close()
+                }
+                drawPath(wave, Brush.verticalGradient(listOf(Color(0xFF00A6A6), Color(0xFF0077B6)), startY = h * 0.45f, endY = h))
+                drawPath(androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * 0.1f, h * 0.78f); cubicTo(w * 0.3f, h * 0.55f, w * 0.6f, h * 0.47f, w * 0.82f, h * 0.5f)
+                }, Color.White.copy(alpha = 0.7f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10f))
+                drawRect(Color(0xFF0077B6).copy(alpha = 0.55f), topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.9f), size = androidx.compose.ui.geometry.Size(w, h * 0.1f))
+                rotate(degrees = -28f, pivot = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.6f)) {
+                    drawOval(Color(0xFFF2A900), topLeft = androidx.compose.ui.geometry.Offset(w * 0.44f, h * 0.585f), size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.03f))
+                    drawLine(Color(0xFFC8102E), androidx.compose.ui.geometry.Offset(w * 0.45f, h * 0.6f), androidx.compose.ui.geometry.Offset(w * 0.61f, h * 0.6f), strokeWidth = 4f)
+                }
+                drawRect(Color.White.copy(alpha = 0.25f))
+            }
+            ReoTheme.MOANA -> {
+                // Sous l'océan : rayons de lumière, bulles, poissons, coraux
+                drawRect(Brush.verticalGradient(listOf(Color(0xFF0A6E8A), Color(0xFF032B44), Color(0xFF02192A))))
+                for (i in 0 until 5) {
+                    val x = w * (0.1f + i * 0.2f)
+                    val ray = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(x, 0f); lineTo(x + w * 0.08f, 0f); lineTo(x + w * 0.2f, h * 0.7f); lineTo(x + w * 0.05f, h * 0.7f); close()
+                    }
+                    drawPath(ray, Color.White.copy(alpha = 0.05f))
+                }
+                val r = java.util.Random(5)
+                repeat(26) {
+                    val x = r.nextFloat() * w; val y = r.nextFloat() * h * 0.85f; val rad = 3f + r.nextFloat() * 7f
+                    drawCircle(Color.White.copy(alpha = 0.22f), rad, androidx.compose.ui.geometry.Offset(x, y), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                }
+                fun fish(x: Float, y: Float, s: Float, c: Color) {
+                    drawOval(c, topLeft = androidx.compose.ui.geometry.Offset(x - 22f * s, y - 10f * s), size = androidx.compose.ui.geometry.Size(44f * s, 20f * s))
+                    drawPath(androidx.compose.ui.graphics.Path().apply {
+                        moveTo(x - 18f * s, y); lineTo(x - 34f * s, y - 11f * s); lineTo(x - 34f * s, y + 11f * s); close()
+                    }, c)
+                }
+                fish(w * 0.25f, h * 0.32f, w / 700f, Color(0xFFFFD166).copy(alpha = 0.5f))
+                fish(w * 0.7f, h * 0.45f, w / 900f, Color(0xFFFF9E80).copy(alpha = 0.45f))
+                fish(w * 0.55f, h * 0.22f, w / 1100f, Color(0xFF4FD1C5).copy(alpha = 0.45f))
+                val coral = Color(0xFFFF7F6A).copy(alpha = 0.35f)
+                for (i in 0 until 7) {
+                    val x = w * (0.05f + i * 0.15f)
+                    drawLine(coral, androidx.compose.ui.geometry.Offset(x, h), androidx.compose.ui.geometry.Offset(x - 10f, h * 0.88f), strokeWidth = 14f)
+                    drawLine(coral, androidx.compose.ui.geometry.Offset(x - 6f, h * 0.93f), androidx.compose.ui.geometry.Offset(x + 18f, h * 0.86f), strokeWidth = 10f)
+                }
+                drawRect(Color(0xFFE6D3A3).copy(alpha = 0.25f), topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.95f), size = androidx.compose.ui.geometry.Size(w, h * 0.05f))
+            }
+            ReoTheme.TIFAIFAI -> {
+                // Tīfaifai : grand motif floral rouge symétrique sur fond crème, bordures rouges
+                drawRect(Color(0xFFFFF8EE))
+                val red = Color(0xFFC8102E)
+                val c = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.48f)
+                val R = minOf(w, h) * 0.42f
+                for (k in 0 until 8) {
+                    rotate(degrees = k * 45f, pivot = c) {
+                        val petal = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(c.x, c.y)
+                            cubicTo(c.x - R * 0.28f, c.y - R * 0.35f, c.x - R * 0.2f, c.y - R * 0.9f, c.x, c.y - R)
+                            cubicTo(c.x + R * 0.2f, c.y - R * 0.9f, c.x + R * 0.28f, c.y - R * 0.35f, c.x, c.y)
+                        }
+                        drawPath(petal, red.copy(alpha = 0.13f))
+                        val leaf = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(c.x, c.y - R * 0.55f)
+                            quadraticTo(c.x + R * 0.3f, c.y - R * 0.75f, c.x + R * 0.36f, c.y - R * 0.48f)
+                            quadraticTo(c.x + R * 0.18f, c.y - R * 0.5f, c.x, c.y - R * 0.55f)
+                        }
+                        drawPath(leaf, red.copy(alpha = 0.10f))
+                    }
+                }
+                drawCircle(red.copy(alpha = 0.16f), R * 0.16f, c)
+                drawCircle(Color(0xFFFFF8EE), R * 0.07f, c)
+                val band = h * 0.018f
+                drawRect(red.copy(alpha = 0.85f), size = androidx.compose.ui.geometry.Size(w, band))
+                drawRect(red.copy(alpha = 0.85f), topLeft = androidx.compose.ui.geometry.Offset(0f, h - band), size = androidx.compose.ui.geometry.Size(w, band))
             }
         }
     }
@@ -7430,3 +7660,21 @@ if t.count(old_d) == 1 and t.count(old_c) == 1:
     print("Thèmes du mode stylisé branchés.")
 else:
     warn("Thèmes du mode stylisé : emplacement introuvable.")
+
+# ---------- 10. Logo du haut : une tiare à la place de la bulle pixelisée (le triple toucher reste) ----------
+bbf = pathlib.Path("app/src/main/java/com/bitchat/android/core/ui/component/button/BitChatBrandButton.kt")
+t = bbf.read_text() if bbf.exists() else ""
+_m = re.search(r"        Icon\(\n            imageVector = BitChatIcon,.*?\n        \)\n", t, re.S)
+if _m:
+    t = t[:_m.start()] + """        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(com.bitchat.android.R.drawable.reo_emoji_tiare),
+            contentDescription = contentDescription,
+            modifier = Modifier
+                .size(iconSize + 8.dp)
+                .scale(pressScale),
+        )
+""" + t[_m.end():]
+    bbf.write_text(t)
+    print("Logo : tiare à la place de la bulle.")
+else:
+    warn("Logo : emplacement introuvable.")
