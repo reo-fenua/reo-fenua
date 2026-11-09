@@ -7,6 +7,11 @@ name: Construire l'APK Reo Fenua
 
 on:
   workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Version vérifiée de bitchat-android (laisser tel quel)"
+        required: true
+        default: "14ab73c4afe57deb9a1e7987ac9814b307c2f6ab"
 
 permissions:
   contents: write
@@ -19,13 +24,24 @@ jobs:
       TAG: v1.${{ github.run_number }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Récupérer bitchat-android
-        run: git clone --depth 1 https://github.com/permissionlesstech/bitchat-android.git upstream
+      # Sécurité : on construit toujours à partir d'une version précise et connue de bitchat-android,
+      # jamais « la dernière du moment ». Un changement inattendu chez eux n'entre donc pas dans Reo Fenua.
+      - name: Récupérer bitchat-android (version fixée)
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: |
+          git init -q upstream
+          cd upstream
+          git remote add origin https://github.com/permissionlesstech/bitchat-android.git
+          git fetch -q --depth 1 origin "$UPSTREAM_REF"
+          git checkout -q FETCH_HEAD
+          git log -1 --format='bitchat-android : %H du %cd'
 
       - name: Récupérer les fichiers Reo Fenua (dossier patch)
         uses: actions/checkout@v4
         with:
           path: reo
+          persist-credentials: false
 
       - name: Appliquer le style Reo Fenua et le relais automatique
         working-directory: upstream
@@ -321,8 +337,8 @@ jobs:
           KS: ${{ secrets.REO_FENUA_KEYSTORE }}
         run: |
           if [ -z "$KS" ]; then
-            echo "::warning::Secret REO_FENUA_KEYSTORE absent : clé aléatoire, les mises à jour ne s'installeront pas par-dessus."
-            exit 0
+            echo "::error::Secret REO_FENUA_KEYSTORE absent : on arrête, pour ne jamais publier une version signée avec une autre clé."
+            exit 1
           fi
           for d in "$HOME/.android" "${ANDROID_USER_HOME:-$HOME/.android}"; do
             mkdir -p "$d"
@@ -349,6 +365,8 @@ jobs:
             if [ -n "$F" ]; then cp "$F" "sortie/reo-fenua-$ABI.apk"; fi
           done
           ls -la sortie/
+          # Empreintes SHA-256 : chacun peut vérifier que le fichier téléchargé est bien celui publié
+          (cd sortie && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
           # Empreinte de la signature : doit être identique à chaque version
           SIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
           "$SIGNER" verify --print-certs sortie/reo-fenua.apk | grep -i 'SHA-256' || true
@@ -363,7 +381,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$TAG" sortie/*.apk \
-            --repo "${{ github.repository }}" \
+          {
+            echo "Pour installer Reo Fenua : téléchargez **reo-fenua.apk** (marche sur tous les téléphones Android), ouvrez-le et autorisez l'installation d'applications inconnues. Les autres fichiers (arm64, armeabi…) sont des versions plus légères utilisées automatiquement par le bouton de mise à jour."
+            echo
+            echo "**Important – nouvelle identité de l'app.** Reo Fenua a maintenant son propre identifiant sur Android. Si vous aviez une version d'avant, la mise à jour installe la nouvelle Reo Fenua à côté de l'ancienne : ouvrez la nouvelle et touchez « Retirer l'ancienne Reo Fenua ». Les anciens messages ne sont pas repris, et vous apparaîtrez comme une nouvelle personne chez vos proches."
+            echo
+            echo "Empreintes SHA-256 des fichiers (pour vérifier un téléchargement) :"
+            echo
+            echo '```'
+            cat sortie/SHA256SUMS.txt
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" sortie/*.apk sortie/SHA256SUMS.txt \
+            --repo "$REPO" \
             --title "Reo Fenua $TAG" \
-            --notes "Pour installer Reo Fenua : téléchargez **reo-fenua.apk** (marche sur tous les téléphones Android), ouvrez-le et autorisez l'installation d'applications inconnues. Les autres fichiers (arm64, armeabi…) sont des versions plus légères utilisées automatiquement par le bouton de mise à jour."
+            --notes-file notes.md
