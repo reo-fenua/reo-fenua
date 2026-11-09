@@ -1025,7 +1025,8 @@ private fun RoundAction(
 @Composable
 fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
     ReoFenuaMode.load(LocalContext.current)
-    LaunchedEffect(Unit) { ReoFenuaUpdate.checkInBackground() }
+    val reoAppContext = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) { ReoFenuaUpdate.checkInBackground(reoAppContext) }
     val newVersion = ReoFenuaUpdate.available.value
     // Bandeau « position partagée » en haut, au centre
     // Sous la pastille « Mode » (et la pastille « Mise à jour ») pour ne jamais les chevaucher
@@ -1794,6 +1795,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.verticalScroll
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1816,15 +1818,44 @@ object ReoFenuaUpdate {
     /** « Plus tard » : on cache le bandeau jusqu'au prochain lancement de l'app. */
     val bannerHidden = androidx.compose.runtime.mutableStateOf(false)
 
+    private const val MAX_APK_BYTES = 300L * 1024 * 1024
+
+    /** « v1.57 » → [1, 57]. Null si le nom de version n'a pas la forme attendue. */
+    private fun numbers(tag: String): List<Int>? {
+        if (!Regex("^v\\d{1,6}(\\.\\d{1,6}){0,3}$").matches(tag)) return null
+        return tag.substring(1).split(".").map { it.toInt() }
+    }
+
+    /** Vrai seulement si [tag] est une version plus récente que celle installée (jamais un retour en arrière). */
+    fun isNewer(tag: String): Boolean {
+        val a = numbers(tag) ?: return false
+        val b = numbers(CURRENT_TAG) ?: return tag != CURRENT_TAG
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
+    }
+
     /** Vérifie au lancement puis toutes les 3 heures tant que l'app est ouverte (si internet). */
-    suspend fun checkInBackground() {
+    suspend fun checkInBackground(context: Context? = null) {
         if (running) return
         running = true
         try {
+            // Un ancien fichier de mise à jour ne doit pas traîner sur le téléphone
+            try {
+                if (context != null) {
+                    val old = updateFile(context)
+                    if (old.exists() && System.currentTimeMillis() - old.lastModified() > 24L * 3600 * 1000) old.delete()
+                    File(old.parentFile, old.name + ".part").delete()
+                }
+            } catch (_: Exception) {
+            }
             while (true) {
                 try {
                     val r = withContext(Dispatchers.IO) { fetchLatest() }
-                    if (r != null && r.tag != CURRENT_TAG) available.value = r.tag
+                    if (r != null && isNewer(r.tag)) available.value = r.tag
                 } catch (e: Exception) {
                     // pas d'internet : on réessaiera plus tard
                 }
@@ -1874,6 +1905,9 @@ object ReoFenuaUpdate {
                 }
             }
             val asset = chosen ?: return null
+            // Le fichier doit venir des Releases officielles de Reo Fenua, en HTTPS, et de nulle part ailleurs
+            if (numbers(tag) == null) return null
+            if (!asset.getString("browser_download_url").startsWith("https://github.com/$REPO/releases/download/")) return null
             return Release(
                 tag = tag,
                 url = asset.getString("browser_download_url"),
@@ -1896,6 +1930,8 @@ object ReoFenuaUpdate {
         val target = updateFile(context)
         val partial = File(target.parentFile, target.name + ".part")
         partial.delete()
+        target.delete()
+        if (!release.url.startsWith("https://github.com/$REPO/releases/download/")) return false
         val conn = URL(release.url).openConnection() as HttpURLConnection
         conn.connectTimeout = 20000
         conn.readTimeout = 30000
@@ -1903,7 +1939,11 @@ object ReoFenuaUpdate {
         conn.setRequestProperty("User-Agent", "ReoFenua")
         try {
             if (conn.responseCode != 200) return false
+            // Après redirection, on doit toujours être chez GitHub, en HTTPS
+            val host = conn.url.host.lowercase()
+            if (conn.url.protocol != "https" || !(host == "github.com" || host.endsWith(".githubusercontent.com"))) return false
             val total = if (release.size > 0) release.size else conn.contentLengthLong
+            if (total > MAX_APK_BYTES) return false
             var done = 0L
             conn.inputStream.use { input ->
                 partial.outputStream().use { output ->
@@ -1913,6 +1953,7 @@ object ReoFenuaUpdate {
                         if (n < 0) break
                         output.write(buffer, 0, n)
                         done += n
+                        if (done > MAX_APK_BYTES) throw java.io.IOException("fichier trop gros")
                         if (total > 0) onProgress((done.toFloat() / total.toFloat()).coerceIn(0f, 1f))
                     }
                 }
@@ -1928,8 +1969,58 @@ object ReoFenuaUpdate {
         }
     }
 
+    fun certsOf(info: android.content.pm.PackageInfo?): Set<String> {
+        if (info == null) return emptySet()
+        val sigs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val si = info.signingInfo
+            if (si == null) null else if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures
+        }
+        if (sigs == null || sigs.isEmpty()) return emptySet()
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        return sigs.map { s -> md.digest(s.toByteArray()).joinToString("") { b -> "%02x".format(b) } }.toSet()
+    }
+
+    /**
+     * Contrôle le fichier téléchargé AVANT de le proposer à l'installation :
+     * c'est bien Reo Fenua, signé avec la même clé que l'app installée, et pas une version plus ancienne.
+     * Renvoie null si tout va bien, sinon la raison du refus.
+     */
+    fun verify(context: Context): String? {
+        return try {
+            val f = updateFile(context)
+            if (!f.exists() || f.length() < 1_000_000L) return "fichier incomplet"
+            val pm = context.packageManager
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                android.content.pm.PackageManager.GET_SIGNATURES
+            }
+            val apk = pm.getPackageArchiveInfo(f.absolutePath, flags) ?: return "fichier illisible"
+            val mine = pm.getPackageInfo(context.packageName, flags)
+            if (apk.packageName != context.packageName) return "ce n'est pas Reo Fenua"
+            val theirs = certsOf(apk)
+            val ours = certsOf(mine)
+            // Si Android ne sait pas lire la signature du fichier ici, il la contrôlera de toute façon à l'installation.
+            if (theirs.isNotEmpty() && ours.isNotEmpty() && theirs.intersect(ours).isEmpty()) return "signature différente"
+            val newCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(apk)
+            val myCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(mine)
+            if (newCode < myCode) return "version plus ancienne"
+            null
+        } catch (e: Exception) {
+            "contrôle impossible"
+        }
+    }
+
     /** Lance l'installation ; renvoie false si Android demande d'abord l'autorisation. */
     fun install(context: Context): Boolean {
+        if (verify(context) != null) {
+            updateFile(context).delete()
+            throw IllegalStateException("mise à jour refusée")
+        }
         if (!context.packageManager.canRequestPackageInstalls()) {
             val settings = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -2034,7 +2125,15 @@ fun ReoFenuaUpdateCard() {
                                     false
                                 }
                                 downloading = false
-                                if (ok) {
+                                val refused = if (ok) withContext(Dispatchers.IO) { ReoFenuaUpdate.verify(context) } else null
+                                if (ok && refused != null) {
+                                    try {
+                                        ReoFenuaUpdate.updateFile(context).delete()
+                                    } catch (_: Exception) {
+                                    }
+                                    status = "Mise à jour refusée par sécurité ($refused). Le fichier a été supprimé. " +
+                                        "Réessayez plus tard ; si cela continue, prévenez l'équipe Reo Fenua."
+                                } else if (ok) {
                                     ready = true
                                     status = "Téléchargement terminé ! Touchez « Installer », puis « Mettre à jour ». Vos messages sont conservés."
                                     startInstall()
@@ -2065,8 +2164,8 @@ fun ReoFenuaUpdateCard() {
                                 busy = false
                                 if (result == null) {
                                     status = "Impossible de vérifier. Il faut une connexion internet."
-                                } else if (result.tag == ReoFenuaUpdate.CURRENT_TAG) {
-                                    status = "Vous avez la dernière version (" + result.tag + ")."
+                                } else if (!ReoFenuaUpdate.isNewer(result.tag)) {
+                                    status = "Vous avez la dernière version (" + ReoFenuaUpdate.CURRENT_TAG + ")."
                                 } else {
                                     val mo = if (result.size > 0) " (" + (result.size / (1024 * 1024)) + " Mo)" else ""
                                     status = "Nouvelle version disponible : " + result.tag + mo +
@@ -2082,6 +2181,128 @@ fun ReoFenuaUpdateCard() {
                         Text(text = "Rechercher une mise à jour", fontSize = 17.sp)
                     }
                 }
+            }
+        }
+    }
+}
+
+// ===================== Nouvelle identité de l'app (ancienne : com.bitchat.droid) =====================
+
+/**
+ * Reo Fenua a désormais son propre identifiant Android. L'ancienne version reste installée à côté :
+ * on explique la situation et on propose de la retirer. On ne parle QUE de l'ancienne Reo Fenua
+ * (même signature que nous), jamais du vrai BitChat, qui peut maintenant cohabiter.
+ */
+object ReoFenuaMove {
+    const val OLD_ID = "com.bitchat.droid"
+    val show = mutableStateOf(false)
+    /** « Plus tard » : on n'en reparle qu'au prochain lancement. */
+    var later = false
+
+    private fun flags(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+    } else {
+        @Suppress("DEPRECATION")
+        android.content.pm.PackageManager.GET_SIGNATURES
+    }
+
+    fun oldReoFenuaInstalled(context: Context): Boolean {
+        if (context.packageName == OLD_ID) return false
+        return try {
+            val pm = context.packageManager
+            val old = ReoFenuaUpdate.certsOf(pm.getPackageInfo(OLD_ID, flags()))
+            val mine = ReoFenuaUpdate.certsOf(pm.getPackageInfo(context.packageName, flags()))
+            old.isNotEmpty() && old.intersect(mine).isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun refresh(context: Context) {
+        show.value = !later && oldReoFenuaInstalled(context)
+    }
+
+    fun removeOld(context: Context) {
+        val uri = Uri.parse("package:$OLD_ID")
+        try {
+            context.startActivity(Intent(Intent.ACTION_DELETE, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (_: Exception) {
+        }
+        try {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
+}
+
+@Composable
+fun ReoFenuaMoveNotice() {
+    val context = LocalContext.current
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) ReoFenuaMove.refresh(context)
+        }
+        owner.lifecycle.addObserver(obs)
+        ReoFenuaMove.refresh(context)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    if (!ReoFenuaMove.show.value) return
+    // On attend la fin de l'accueil (introduction, prénom, règles de vie)
+    if (ReoFenuaGuide.showIntro.value || ReoFenuaName.needsAsk.value || ReoFenuaCharter.needs.value) return
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = { },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            shape = MaterialTheme.shapes.extraLarge,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "🌺 Bienvenue dans la nouvelle Reo Fenua",
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Reo Fenua a maintenant sa propre identité sur votre téléphone. C'est plus sûr, " +
+                        "et Reo Fenua peut désormais être installée à côté de BitChat.",
+                    fontSize = 17.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Surface(color = androidx.compose.ui.graphics.Color(0xFFFFF4D6), shape = MaterialTheme.shapes.large) {
+                    Text(
+                        text = "L'ancienne Reo Fenua est encore sur ce téléphone (même icône). " +
+                            "Ses messages et ses lettres ne passent pas dans la nouvelle.\n\n" +
+                            "• Si vous voulez garder un message, ouvrez l'ancienne et notez-le avant de la retirer.\n" +
+                            "• Dans la nouvelle, redonnez votre prénom et, si vous en aviez un, choisissez à nouveau votre code.\n" +
+                            "• Chez vos proches, vous apparaîtrez comme une nouvelle personne : dites-leur que c'est bien vous.",
+                        fontSize = 16.sp,
+                        color = androidx.compose.ui.graphics.Color(0xFF1D2A33),
+                        modifier = Modifier.padding(14.dp)
+                    )
+                }
+                Button(
+                    onClick = { ReoFenuaMove.removeOld(context) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                ) { Text(text = "Retirer l'ancienne Reo Fenua", fontSize = 17.sp) }
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        ReoFenuaMove.later = true
+                        ReoFenuaMove.show.value = false
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) { Text(text = "Plus tard", fontSize = 16.sp) }
             }
         }
     }
@@ -2932,27 +3153,34 @@ fun ReoFenuaSoundWatcher(viewModel: ChatViewModel) {
         val recent = System.currentTimeMillis() - 120_000L
         var fresh = false
         var alert: com.bitchat.android.model.BitchatMessage? = null
-        val all = ArrayList<com.bitchat.android.model.BitchatMessage>()
-        all.addAll(messages)
-        for (list in chats.values) all.addAll(list)
-        for (m in all) {
+        ReoFenuaBlock.load(context)
+        // (message, clé de la conversation privée ou null si message public)
+        val all = ArrayList<Pair<com.bitchat.android.model.BitchatMessage, String?>>()
+        for (m in messages) all.add(Pair(m, null))
+        for ((conv, list) in chats) for (m in list) all.add(Pair(m, conv))
+        for ((m, conv) in all) {
             val isNew = seen.add(m.id)
-            if (isNew && m.senderPeerID != me && m.sender != myNick && m.sender != "system") {
-                ReoFenuaWellbeing.observe(context, m)
-            }
-            if (isNew && primed.value) {
-                val fromOther = m.senderPeerID != me && m.sender != myNick && m.sender != "system"
-                if (fromOther && m.timestamp.time > recent) {
-                    fresh = true
-                    if (m.content.startsWith(ReoFenuaAlert.PREFIX)) alert = m
-                }
+            if (!isNew) continue
+            val fromOther = m.senderPeerID != me && m.sender != myNick && m.sender != "system"
+            if (!fromOther) continue
+            // Une personne bloquée ne déclenche ni son, ni alerte, ni « va bien »
+            val blocked = (m.senderPeerID?.let { ReoFenuaBlock.isBlocked(it) } == true) ||
+                (conv != null && ReoFenuaBlock.isBlocked(conv))
+            if (blocked) continue
+            ReoFenuaWellbeing.observe(context, m, conv)
+            if (primed.value && m.timestamp.time > recent) {
+                fresh = true
+                if (m.content.startsWith(ReoFenuaAlert.PREFIX) &&
+                    ReoFenuaAlert.allowIncoming(m.senderPeerID ?: conv ?: ("nom:" + m.sender))
+                ) alert = m
             }
         }
+        if (seen.size > 20000) seen.clear()
         primed.value = true
         val a = alert
         if (a != null) {
             // Alerte reçue : grande carte rouge et son du pū, même si un autre son est choisi.
-            ReoFenuaAlert.received.value = Pair(a.sender, a.content)
+            ReoFenuaAlert.received.value = Pair(a.sender.take(40), a.content.take(300))
             ReoFenuaSound.play(context, index = 1, force = true)
         } else if (fresh) {
             ReoFenuaSound.play(context)
@@ -3137,12 +3365,16 @@ object ReoFenuaContacts {
         try {
             val f = File(context.filesDir, FILE)
             if (!f.exists()) return
-            val o = JSONObject(f.readText())
+            val raw = f.readText()
+            val plain = ReoFenuaVault.open(raw) ?: return
+            val o = JSONObject(plain)
             val keys = o.keys()
             while (keys.hasNext()) {
                 val k = keys.next()
                 aliases[k] = o.optString(k)
             }
+            // ancien fichier en clair : on le réécrit chiffré
+            if (!ReoFenuaVault.isSealed(raw)) save(context)
         } catch (e: Exception) {
             // fichier abîmé : on repart de zéro
         }
@@ -3152,7 +3384,7 @@ object ReoFenuaContacts {
         try {
             val o = JSONObject()
             for ((k, v) in aliases) o.put(k, v)
-            File(context.filesDir, FILE).writeText(o.toString())
+            File(context.filesDir, FILE).writeText(ReoFenuaVault.seal(o.toString()))
         } catch (e: Exception) {
             // on réessaiera
         }
@@ -3302,11 +3534,33 @@ object ReoFenuaAlert {
     private const val KEY_PLACE = "alert_place"
     private val lastSent = HashMap<String, Long>()
 
-    fun loadPlace(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PLACE, "") ?: ""
+    /** Le lieu (adresse, PK…) est gardé chiffré sur le téléphone. */
+    fun loadPlace(context: Context): String {
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PLACE, "") ?: ""
+        return if (stored.isEmpty()) "" else (ReoFenuaVault.open(stored) ?: "")
+    }
 
     fun savePlace(context: Context, place: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PLACE, place.trim()).apply()
+        val p = place.trim().take(80)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_PLACE, if (p.isEmpty()) "" else ReoFenuaVault.seal(p)).apply()
+    }
+
+    // ---- Alertes reçues : pas de rafale, pas de fausse alerte en boucle ----
+    private val lastFrom = HashMap<String, Long>()
+    private val recentShown = ArrayList<Long>()
+
+    /** Grande carte rouge : une par personne et par minute, trois au plus en 5 minutes. */
+    fun allowIncoming(senderKey: String): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastFrom[senderKey] ?: 0L
+        if (now - last < 60_000L) return false
+        recentShown.removeAll { now - it > 5 * 60_000L }
+        if (recentShown.size >= 3) return false
+        if (lastFrom.size > 500) lastFrom.clear()
+        lastFrom[senderKey] = now
+        recentShown.add(now)
+        return true
     }
 
     /** Une seule alerte identique par minute, pour éviter les envois en rafale. */
@@ -3546,6 +3800,7 @@ fun ReoFenuaEasyHost(viewModel: ChatViewModel) {
     NameAsker(viewModel)
     ReoFenuaCharterScreen()
     ReoFenuaModeChooser()
+    ReoFenuaMoveNotice()
     ReceivedAlertDialog(viewModel)
     if (ReoFenuaAlert.show.value) {
         AlertDialogScreen(viewModel = viewModel, onClose = { ReoFenuaAlert.show.value = false })
@@ -5921,7 +6176,7 @@ object ReoFenuaWellbeing {
     enum class Kind { OK, NEED }
     data class Status(val kind: Kind, val time: Long)
 
-    /** Clé = identifiant de la personne, ou « nom:<pseudo> » si l'identifiant manque. */
+    /** Clé = identifiant de la personne (jamais le pseudo : n'importe qui peut prendre un pseudo). */
     val status = mutableStateMapOf<String, Status>()
     private var loaded = false
 
@@ -5934,6 +6189,7 @@ object ReoFenuaWellbeing {
             val o = JSONObject(raw)
             val limit = System.currentTimeMillis() - KEEP_MS
             for (k in o.keys()) {
+                if (k.startsWith("nom:")) continue
                 val v = o.getJSONObject(k)
                 val t = v.optLong("t")
                 if (t < limit) continue
@@ -5961,15 +6217,19 @@ object ReoFenuaWellbeing {
         return null
     }
 
-    /** Appelé pour chaque nouveau message reçu d'une autre personne. */
-    fun observe(context: Context, m: com.bitchat.android.model.BitchatMessage) {
+    /**
+     * Appelé pour chaque nouveau message reçu d'une autre personne.
+     * [conversation] = clé de la conversation privée (message chiffré de bout en bout), sinon null.
+     */
+    fun observe(context: Context, m: com.bitchat.android.model.BitchatMessage, conversation: String?) {
         load(context)
         val kind = classify(m.content) ?: return
-        val t = m.timestamp.time
-        if (t < System.currentTimeMillis() - KEEP_MS) return
+        val now = System.currentTimeMillis()
+        val t = minOf(m.timestamp.time, now)
+        if (t < now - KEEP_MS) return
         val keys = ArrayList<String>()
-        m.senderPeerID?.let { keys.add(it) }
-        if (m.sender.isNotBlank()) keys.add("nom:" + m.sender)
+        m.senderPeerID?.let { if (it.isNotBlank()) keys.add(it) }
+        if (!conversation.isNullOrBlank() && !keys.contains(conversation)) keys.add(conversation)
         var changed = false
         for (k in keys) {
             val old = status[k]
@@ -5978,18 +6238,17 @@ object ReoFenuaWellbeing {
                 changed = true
             }
         }
-        if (changed) save(context)
-    }
-
-    fun find(key: String, name: String): Status? {
-        val a = status[key]
-        val b = status["nom:$name"]
-        return when {
-            a == null -> b
-            b == null -> a
-            else -> if (a.time >= b.time) a else b
+        if (changed) {
+            if (status.size > 300) {
+                val limit = now - KEEP_MS
+                status.entries.filter { it.value.time < limit }.forEach { status.remove(it.key) }
+            }
+            save(context)
         }
     }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun find(key: String, name: String): Status? = status[key]
 
     fun label(s: Status): String {
         val now = System.currentTimeMillis()
@@ -6137,14 +6396,25 @@ object ReoFenuaVault {
     }
 
     /** Texte en clair → texte chiffré. En cas de souci matériel, on garde le texte tel quel. */
-    fun seal(plain: String): String = try {
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, key())
-        val iv = c.iv
-        val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
-        PREFIX + Base64.encodeToString(iv + ct, Base64.NO_WRAP)
-    } catch (_: Exception) {
-        plain
+    fun seal(plain: String): String {
+        for (attempt in 0..1) {
+            try {
+                val c = Cipher.getInstance("AES/GCM/NoPadding")
+                c.init(Cipher.ENCRYPT_MODE, key())
+                val iv = c.iv
+                val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
+                return PREFIX + Base64.encodeToString(iv + ct, Base64.NO_WRAP)
+            } catch (_: android.security.keystore.KeyPermanentlyInvalidatedException) {
+                // clé devenue inutilisable : on en crée une neuve et on réessaie une fois
+                try {
+                    KeyStore.getInstance(PROVIDER).apply { load(null) }.deleteEntry(ALIAS)
+                } catch (_: Exception) {
+                }
+            } catch (_: Exception) {
+                break
+            }
+        }
+        return plain
     }
 
     /** Texte chiffré (ou ancien texte en clair) → texte en clair. Null si illisible. */
@@ -6170,17 +6440,28 @@ object ReoFenuaVault {
             KeyStore.getInstance(PROVIDER).apply { load(null) }.deleteEntry(ALIAS)
         } catch (_: Exception) {
         }
-        try {
-            java.io.File(context.filesDir, "reo_letters.json").delete()
-        } catch (_: Exception) {
+        // Lettres, proches (noms et photos), fond d'écran, mise à jour téléchargée
+        for (name in listOf("reo_letters.json", "reo_contacts.json", "reo_wallpaper.jpg")) {
+            try {
+                java.io.File(context.filesDir, name).delete()
+            } catch (_: Exception) {
+            }
         }
         try {
-            context.getSharedPreferences("reo_fenua_guide", Context.MODE_PRIVATE).edit()
-                .remove("wellbeing_v1").remove("lock_hash").remove("lock_salt").apply()
+            java.io.File(context.filesDir, "reo_contacts").deleteRecursively()
+            java.io.File(context.cacheDir, "apk_update").deleteRecursively()
+        } catch (_: Exception) {
+        }
+        // Tous les réglages Reo Fenua : lieu d'alerte, personnes bloquées, code, nouvelles des proches…
+        try {
+            context.getSharedPreferences("reo_fenua_guide", Context.MODE_PRIVATE).edit().clear().commit()
         } catch (_: Exception) {
         }
         ReoFenuaWellbeing.status.clear()
         ReoFenuaLetters.letters.clear()
+        ReoFenuaContacts.aliases.clear()
+        ReoFenuaContacts.photoVersion.value += 1
+        ReoFenuaBlock.blocked.clear()
         ReoFenuaLock.enabled.value = false
         ReoFenuaLock.locked.value = false
     }
@@ -6192,14 +6473,15 @@ object ReoFenuaLock {
     private const val PREFS = "reo_fenua_guide"
     private const val K_HASH = "lock_hash"
     private const val K_SALT = "lock_salt"
+    private const val K_FAILS = "lock_fails"
+    private const val K_UNTIL = "lock_until"
     private const val RELOCK_MS = 2 * 60 * 1000L
+    private const val FREE_TRIES = 5
 
     val enabled = mutableStateOf(false)
     val locked = mutableStateOf(false)
     private var loaded = false
     private var stoppedAt = 0L
-    private var failures = 0
-    var relockAfterAlert = false
 
     fun load(context: Context) {
         if (loaded) return
@@ -6214,41 +6496,97 @@ object ReoFenuaLock {
         return Base64.encodeToString(k, Base64.NO_WRAP)
     }
 
+    /** L'empreinte du code est elle-même chiffrée par le coffre-fort : inutilisable hors de ce téléphone. */
     fun set(context: Context, pin: String) {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(K_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-            .putString(K_HASH, hash(pin, salt))
+            .putString(K_HASH, ReoFenuaVault.seal(hash(pin, salt)))
+            .remove(K_FAILS).remove(K_UNTIL)
             .apply()
         enabled.value = true
     }
 
     fun remove(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(K_HASH).remove(K_SALT).apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(K_HASH).remove(K_SALT).remove(K_FAILS).remove(K_UNTIL).apply()
         enabled.value = false
         locked.value = false
     }
 
+    /** Compare le code sans rien changer (temps constant). */
+    fun verify(context: Context, pin: String): Boolean {
+        return try {
+            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val stored = ReoFenuaVault.open(p.getString(K_HASH, null) ?: return false) ?: return false
+            val salt = Base64.decode(p.getString(K_SALT, "") ?: "", Base64.NO_WRAP)
+            java.security.MessageDigest.isEqual(
+                stored.toByteArray(Charsets.UTF_8),
+                hash(pin, salt).toByteArray(Charsets.UTF_8)
+            )
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Attente imposée après la n-ième erreur. Le compteur est gardé même si l'app est fermée. */
+    private fun delayFor(fails: Int): Long = when {
+        fails < FREE_TRIES -> 0L
+        fails == FREE_TRIES -> 30_000L
+        fails == FREE_TRIES + 1 -> 60_000L
+        fails == FREE_TRIES + 2 -> 5 * 60_000L
+        fails == FREE_TRIES + 3 -> 15 * 60_000L
+        else -> 60 * 60_000L
+    }
+
     fun check(context: Context, pin: String): Boolean {
+        if (waitSeconds(context) > 0) return false
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val salt = Base64.decode(p.getString(K_SALT, "") ?: "", Base64.NO_WRAP)
-        val ok = p.getString(K_HASH, null) == hash(pin, salt)
+        val ok = verify(context, pin)
         if (ok) {
-            failures = 0
+            p.edit().remove(K_FAILS).remove(K_UNTIL).apply()
             locked.value = false
         } else {
-            failures++
+            val fails = p.getInt(K_FAILS, 0) + 1
+            p.edit().putInt(K_FAILS, fails)
+                .putLong(K_UNTIL, System.currentTimeMillis() + delayFor(fails))
+                .commit()
         }
         return ok
     }
 
-    /** Après plusieurs erreurs, on fait patienter un peu plus à chaque fois. */
-    fun waitSeconds(): Int = if (failures < 5) 0 else minOf(60, (failures - 4) * 10)
+    /** Secondes à patienter avant un nouvel essai (0 = on peut essayer). */
+    fun waitSeconds(context: Context): Int {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val until = p.getLong(K_UNTIL, 0L)
+        if (until <= 0L) return 0
+        val now = System.currentTimeMillis()
+        // Horloge reculée pour tricher : on repart pour l'attente complète
+        val max = delayFor(p.getInt(K_FAILS, 0))
+        if (until - now > max) {
+            p.edit().putLong(K_UNTIL, now + max).apply()
+            return ((max + 999) / 1000).toInt()
+        }
+        return if (until > now) ((until - now + 999) / 1000).toInt() else 0
+    }
+
+    fun waitText(seconds: Int): String =
+        if (seconds >= 120) "${(seconds + 59) / 60} minutes" else "$seconds secondes"
 
     fun onStop() { stoppedAt = System.currentTimeMillis() }
     fun onStart() {
         if (enabled.value && stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > RELOCK_MS) locked.value = true
     }
+}
+
+/** Retrouve l'écran (Activity) derrière un contexte Compose. */
+private fun reoActivity(context: Context): android.app.Activity? {
+    var c: Context? = context
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
 }
 
 /** Écran de verrouillage, posé au-dessus de toute l'application. */
@@ -6268,17 +6606,29 @@ fun ReoFenuaLockHost(viewModel: ChatViewModel) {
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    androidx.compose.runtime.LaunchedEffect(ReoFenuaAlert.show.value) {
-        if (ReoFenuaLock.relockAfterAlert && !ReoFenuaAlert.show.value) {
-            ReoFenuaLock.relockAfterAlert = false
-            ReoFenuaLock.locked.value = true
+    // Quand un code est activé : pas de capture d'écran ni d'aperçu dans les applications récentes.
+    val secure = ReoFenuaLock.enabled.value
+    DisposableEffect(secure) {
+        val w = reoActivity(context)?.window
+        try {
+            if (secure) w?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            else w?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        } catch (_: Exception) {
         }
+        onDispose { }
     }
     if (!ReoFenuaLock.locked.value) return
 
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmErase by remember { mutableStateOf(false) }
+    var wait by remember { mutableStateOf(ReoFenuaLock.waitSeconds(context)) }
+    androidx.compose.runtime.LaunchedEffect(wait) {
+        if (wait > 0) {
+            kotlinx.coroutines.delay(1000)
+            wait = ReoFenuaLock.waitSeconds(context)
+        }
+    }
     Dialog(
         onDismissRequest = { },
         properties = DialogProperties(
@@ -6303,21 +6653,23 @@ fun ReoFenuaLockHost(viewModel: ChatViewModel) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     modifier = Modifier.fillMaxWidth()
                 )
-                error?.let { Text(text = it, color = Color(0xFFFFB4B4), fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp)) }
+                if (wait > 0) {
+                    Text(
+                        text = "Trop d'erreurs : patientez " + ReoFenuaLock.waitText(wait) + ".",
+                        color = Color(0xFFFFB4B4), fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp)
+                    )
+                } else {
+                    error?.let { Text(text = it, color = Color(0xFFFFB4B4), fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp)) }
+                }
                 Button(
                     onClick = {
-                        val wait = ReoFenuaLock.waitSeconds()
-                        if (wait > 0 && error != null && error!!.startsWith("Trop")) return@Button
                         if (!ReoFenuaLock.check(context, pin)) {
                             pin = ""
-                            val w = ReoFenuaLock.waitSeconds()
-                            error = if (w > 0) "Trop d'erreurs : patientez $w secondes." else "Code incorrect."
-                            if (w > 0) {
-                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ error = "Réessayez." }, w * 1000L)
-                            }
+                            error = "Code incorrect."
+                            wait = ReoFenuaLock.waitSeconds(context)
                         }
                     },
-                    enabled = pin.length >= 4,
+                    enabled = pin.length >= 4 && wait == 0,
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 56.dp)
                 ) { Text(text = "Ouvrir", fontSize = 18.sp) }
                 Text(
@@ -6328,10 +6680,8 @@ fun ReoFenuaLockHost(viewModel: ChatViewModel) {
                 )
                 Button(
                     onClick = {
-                        ReoFenuaLock.locked.value = false
+                        // L'écran d'alerte s'ouvre par-dessus : l'app reste verrouillée derrière.
                         ReoFenuaAlert.show.value = true
-                        // on reverrouille dès la fermeture de l'écran d'alerte
-                        ReoFenuaLock.relockAfterAlert = true
                     },
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFFC8102E), contentColor = Color.White),
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 56.dp)
@@ -6364,8 +6714,13 @@ fun ReoFenuaLockSetting() {
     val context = LocalContext.current
     ReoFenuaLock.load(context)
     var editing by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
+    var cur by remember { mutableStateOf("") }
     var a by remember { mutableStateOf("") }
     var b by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
+    val has = ReoFenuaLock.enabled.value
+    fun clear() { editing = false; removing = false; cur = ""; a = ""; b = ""; wrong = false }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large,
@@ -6373,17 +6728,28 @@ fun ReoFenuaLockSetting() {
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = if (ReoFenuaLock.enabled.value) "🔒 Code de verrouillage : activé" else "🔓 Verrouiller Reo Fenua par un code",
+                text = if (has) "🔒 Code de verrouillage : activé" else "🔓 Verrouiller Reo Fenua par un code",
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = "L'app se verrouille 2 minutes après l'avoir quittée. Le bouton ALERTE reste toujours accessible. " +
+                    "Avec un code, les captures d'écran sont bloquées. " +
                     "Attention : si vous oubliez ce code, personne ne pourra le retrouver, pas même Reo Fenua. Il faudra tout effacer et repartir avec une nouvelle identité.",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if ((editing || removing) && has) {
+                OutlinedTextField(
+                    value = cur, onValueChange = { v -> cur = v.filter { it.isDigit() }.take(8); wrong = false },
+                    label = { Text("Code actuel") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (wrong) Text("Code actuel incorrect.", color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+            }
             if (editing) {
                 OutlinedTextField(
                     value = a, onValueChange = { v -> a = v.filter { it.isDigit() }.take(8) },
@@ -6400,17 +6766,40 @@ fun ReoFenuaLockSetting() {
                     modifier = Modifier.fillMaxWidth()
                 )
                 Button(
-                    onClick = { ReoFenuaLock.set(context, a); editing = false; a = ""; b = "" },
-                    enabled = a.length >= 4 && a == b,
+                    onClick = {
+                        if (has && !ReoFenuaLock.verify(context, cur)) {
+                            wrong = true
+                            cur = ""
+                        } else {
+                            ReoFenuaLock.set(context, a)
+                            clear()
+                        }
+                    },
+                    enabled = a.length >= 4 && a == b && (!has || cur.length >= 4),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
                 ) { Text("Enregistrer le code", fontSize = 16.sp) }
-                TextButton(onClick = { editing = false; a = ""; b = "" }) { Text("Annuler") }
+                TextButton(onClick = { clear() }) { Text("Annuler") }
+            } else if (removing) {
+                Button(
+                    onClick = {
+                        if (!ReoFenuaLock.verify(context, cur)) {
+                            wrong = true
+                            cur = ""
+                        } else {
+                            ReoFenuaLock.remove(context)
+                            clear()
+                        }
+                    },
+                    enabled = cur.length >= 4,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                ) { Text("Retirer le code", fontSize = 16.sp) }
+                TextButton(onClick = { clear() }) { Text("Annuler") }
             } else {
                 Button(onClick = { editing = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
-                    Text(if (ReoFenuaLock.enabled.value) "Changer le code" else "Choisir un code", fontSize = 16.sp)
+                    Text(if (has) "Changer le code" else "Choisir un code", fontSize = 16.sp)
                 }
-                if (ReoFenuaLock.enabled.value) {
-                    TextButton(onClick = { ReoFenuaLock.remove(context) }) { Text("Retirer le code", fontSize = 15.sp) }
+                if (has) {
+                    TextButton(onClick = { removing = true }) { Text("Retirer le code", fontSize = 15.sp) }
                 }
             }
         }
@@ -7679,3 +8068,65 @@ if _m:
     print("Logo : tiare à la place de la bulle.")
 else:
     warn("Logo : emplacement introuvable.")
+
+# ---------- 11. Durcissement : app non débogable, numéro de version croissant, effacement complet ----------
+gf = pathlib.Path("app/build.gradle.kts")
+t = gf.read_text() if gf.exists() else ""
+old_dbg = "        debug {\n"
+if t.count(old_dbg) == 1 and "isDebuggable = false" not in t:
+    # Sans cela, n'importe qui avec un câble USB pourrait lire les données privées de l'app (adb run-as).
+    t = t.replace(old_dbg, old_dbg + "            isDebuggable = false\n")
+    print("Build : application non débogable.")
+else:
+    warn("Build : bloc debug introuvable, l'app reste débogable.")
+_run = re.sub(r"\D", "", os.environ.get("TAG", "").split(".")[-1])
+if _run and len(re.findall(r"\n        versionCode = \d+\n", t)) == 1:
+    # Chaque version a un numéro plus grand : Android refuse alors tout retour à une ancienne version.
+    t = re.sub(r"\n        versionCode = \d+\n", "\n        versionCode = %d\n" % (100000 + int(_run)), t)
+    print("Build : numéro de version", 100000 + int(_run))
+else:
+    warn("Build : versionCode introuvable, numéro de version inchangé.")
+# Identité propre de Reo Fenua sur Android (avant : celle de BitChat, « com.bitchat.droid »).
+# Le code interne garde son nom (com.bitchat.android) : seul l'identifiant vu par Android change.
+REO_APP_ID = "pf.reofenua.app"
+_n = t.count('applicationId = "com.bitchat.droid"')
+if _n == 1:
+    t = t.replace('applicationId = "com.bitchat.droid"', 'applicationId = "%s"' % REO_APP_ID)
+    print("Identifiant de l'app :", REO_APP_ID)
+else:
+    warn("Identifiant de l'app introuvable : il reste celui de BitChat.")
+if t:
+    gf.write_text(t)
+
+# Pour reconnaître l'ancienne Reo Fenua et proposer de la retirer
+man = pathlib.Path("app/src/main/AndroidManifest.xml")
+m = man.read_text()
+if "REQUEST_DELETE_PACKAGES" not in m:
+    m = m.replace('    <uses-permission android:name="android.permission.INTERNET" />',
+                  '    <uses-permission android:name="android.permission.INTERNET" />\n'
+                  '    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />', 1)
+if "<queries>" not in m and m.count("    <application") == 1:
+    m = m.replace("    <application", '    <queries>\n        <package android:name="com.bitchat.droid" />\n    </queries>\n\n    <application', 1)
+    print("Détection de l'ancienne Reo Fenua ajoutée.")
+else:
+    warn("Manifeste : bloc queries non ajouté.")
+man.write_text(m)
+
+# FAILLE : bitchat-android ajoute aux builds « debug » un récepteur de test ouvert à toutes les apps
+# (envoi de messages, paquets bruts…). Reo Fenua est construite en debug : on le retire complètement.
+import shutil
+_dbg = pathlib.Path("app/src/debug")
+if _dbg.exists():
+    shutil.rmtree(_dbg)
+    print("Récepteur de test (debug) retiré.")
+
+cvf = UI / "ChatViewModel.kt"
+t = cvf.read_text() if cvf.exists() else ""
+old_p = "    private suspend fun performPanicClearAllData() {\n"
+if t.count(old_p) == 1:
+    # Le triple toucher sur le logo efface aussi les données Reo Fenua (lettres, proches, photos, code, réglages).
+    t = t.replace(old_p, old_p + "        try { ReoFenuaVault.wipe(getApplication()) } catch (_: Exception) { }\n")
+    cvf.write_text(t)
+    print("Effacement d'urgence : données Reo Fenua incluses.")
+else:
+    warn("Effacement d'urgence : emplacement introuvable.")
