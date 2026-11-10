@@ -567,7 +567,8 @@ fun ReoFenuaIntroGate() {
     LaunchedEffect(Unit) {
         if (!ReoFenuaGuide.introSeen(context)) ReoFenuaGuide.showIntro.value = true
     }
-    if (ReoFenuaGuide.showIntro.value) {
+    // L'annonce « nouvelle Reo Fenua » passe avant tout le reste
+    if (ReoFenuaGuide.showIntro.value && !ReoFenuaMove.show.value) {
         ReoFenuaIntroDialog(onDone = {
             ReoFenuaGuide.markSeen(context)
             ReoFenuaGuide.showIntro.value = false
@@ -2245,12 +2246,11 @@ fun ReoFenuaMoveNotice() {
             if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) ReoFenuaMove.refresh(context)
         }
         owner.lifecycle.addObserver(obs)
-        ReoFenuaMove.refresh(context)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
+    // Vérifié dès le tout premier affichage : c'est le premier écran que la personne voit.
+    remember { ReoFenuaMove.refresh(context); 0 }
     if (!ReoFenuaMove.show.value) return
-    // On attend la fin de l'accueil (introduction, prénom, règles de vie)
-    if (ReoFenuaGuide.showIntro.value || ReoFenuaName.needsAsk.value || ReoFenuaCharter.needs.value) return
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = { },
@@ -2269,21 +2269,21 @@ fun ReoFenuaMoveNotice() {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "🌺 Bienvenue dans la nouvelle Reo Fenua",
+                    text = "🌺 Vous êtes dans la NOUVELLE Reo Fenua",
                     fontSize = 23.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Reo Fenua a maintenant sa propre identité sur votre téléphone. C'est plus sûr, " +
-                        "et Reo Fenua peut désormais être installée à côté de BitChat.",
+                    text = "La mise à jour a bien marché. Il reste une chose à faire : retirer l'ancienne Reo Fenua, " +
+                        "sinon elle vous redemandera la mise à jour sans fin.",
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Surface(color = androidx.compose.ui.graphics.Color(0xFFFFF4D6), shape = MaterialTheme.shapes.large) {
                     Text(
-                        text = "L'ancienne Reo Fenua est encore sur ce téléphone (même icône). " +
-                            "Ses messages et ses lettres ne passent pas dans la nouvelle.\n\n" +
+                        text = "Touchez le bouton ci-dessous, puis « OK ». " +
+                            "Les messages et les lettres de l'ancienne ne passent pas dans la nouvelle.\n\n" +
                             "• Si vous voulez garder un message, ouvrez l'ancienne et notez-le avant de la retirer.\n" +
                             "• Dans la nouvelle, redonnez votre prénom et, si vous en aviez un, choisissez à nouveau votre code.\n" +
                             "• Chez vos proches, vous apparaîtrez comme une nouvelle personne : dites-leur que c'est bien vous.",
