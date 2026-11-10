@@ -2282,7 +2282,8 @@ fun ReoFenuaMoveNotice() {
                 )
                 Surface(color = androidx.compose.ui.graphics.Color(0xFFFFF4D6), shape = MaterialTheme.shapes.large) {
                     Text(
-                        text = "Touchez le bouton ci-dessous, puis « OK ». " +
+                        text = "La nouvelle a un bord doré autour de son icône ; l'ancienne n'en a pas. " +
+                            "Touchez le bouton ci-dessous, puis « OK ». " +
                             "Les messages et les lettres de l'ancienne ne passent pas dans la nouvelle.\n\n" +
                             "• Si vous voulez garder un message, ouvrez l'ancienne et notez-le avant de la retirer.\n" +
                             "• Dans la nouvelle, redonnez votre prénom et, si vous en aviez un, choisissez à nouveau votre code.\n" +
@@ -7494,8 +7495,13 @@ ICON_BG = r'''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#0E7C86" android:pathData="M0,0h108v108h-108z"/>
-    <path android:fillColor="#0B3C5D" android:pathData="M0,84 C18,79 36,89 54,84 C72,79 90,89 108,84 V108 H0 Z"/>
+    <!-- Bord doré (nouvelle Reo Fenua) : il prend la forme d'icône du téléphone -->
+    <path android:fillColor="#E8B33A" android:pathData="M0,0h108v108h-108z"/>
+    <group>
+        <clip-path android:pathData="M21.4,54 a32.6,32.6 0 1,0 65.2,0 a32.6,32.6 0 1,0 -65.2,0 Z"/>
+        <path android:fillColor="#0E7C86" android:pathData="M0,0h108v108h-108z"/>
+        <path android:fillColor="#0B3C5D" android:pathData="M0,84 C18,79 36,89 54,84 C72,79 90,89 108,84 V108 H0 Z"/>
+    </group>
 </vector>
 '''
 ICON_FG = r'''<?xml version="1.0" encoding="utf-8"?>
