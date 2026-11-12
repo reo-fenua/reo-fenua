@@ -1038,6 +1038,8 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
             .zIndex(9f)
             .padding(top = topPadding + 58.dp, start = 12.dp, end = 12.dp)
     )
+    // Petits gestes reçus : l'animal traverse aussi l'écran principal
+    ReoFenuaGestesLayer(viewModel = viewModel, peerID = null, peerName = "")
     // Pastille « Mode » bien visible, en haut à droite
     ReoFenuaModePill(
         modifier = Modifier
@@ -3174,6 +3176,8 @@ fun ReoFenuaSoundWatcher(viewModel: ChatViewModel) {
                 if (m.content.startsWith(ReoFenuaAlert.PREFIX) &&
                     ReoFenuaAlert.allowIncoming(m.senderPeerID ?: conv ?: ("nom:" + m.sender))
                 ) alert = m
+                // Petit geste (cœur, câlin…) : seulement en message privé
+                if (conv != null) ReoFenuaGestes.incoming(context, m.content, m.sender, m.senderPeerID ?: conv)
             }
         }
         if (seen.size > 20000) seen.clear()
@@ -3802,6 +3806,7 @@ fun ReoFenuaEasyHost(viewModel: ChatViewModel) {
     ReoFenuaCharterScreen()
     ReoFenuaModeChooser()
     ReoFenuaMoveNotice()
+    ReoFenuaShareHost(viewModel)
     ReceivedAlertDialog(viewModel)
     if (ReoFenuaAlert.show.value) {
         AlertDialogScreen(viewModel = viewModel, onClose = { ReoFenuaAlert.show.value = false })
@@ -4224,12 +4229,14 @@ object ReoFenuaMode {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         needsChoice.value = !prefs.contains(KEY)
         simple.value = prefs.getBoolean(KEY, false)
+        ReoFenuaShare.sync(context, simple.value)
     }
 
     fun set(context: Context, isSimple: Boolean) {
         simple.value = isSimple
         needsChoice.value = false
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, isSimple).apply()
+        ReoFenuaShare.sync(context, isSimple)
         // En mode simple, on met le texte en grand (si la personne ne l'a pas déjà agrandi)
         ReoFenuaTextSize.load(context)
         if (isSimple && ReoFenuaTextSize.scale.value < 1.1f) ReoFenuaTextSize.save(context, 1.15f)
@@ -4891,6 +4898,9 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
 @Composable
 fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val reoNavContext = LocalContext.current
+    // Petit badge sur « Plus » si le téléphone n'est pas prêt (Bluetooth, autorisations…)
+    val phoneNotReady = remember(ReoFenuaPhone.refresh.value, ReoFenuaNav.showPlus.value) { ReoFenuaPhone.notReady(reoNavContext) }
     if (imeVisible) return
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -4911,7 +4921,7 @@ fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
             )
             NavItem("ALERTE", NavIcon.Alerte, { ReoFenuaAlert.show.value = true }, Modifier.weight(1.2f))
             NavItem("Aide", NavIcon.Aide, { ReoFenuaSteps.show.value = true }, Modifier.weight(1f))
-            NavItem("Plus", NavIcon.Plus, { ReoFenuaNav.showPlus.value = true }, Modifier.weight(1f), badge = if (ReoFenuaUpdate.available.value != null) 1 else 0)
+            NavItem("Plus", NavIcon.Plus, { ReoFenuaNav.showPlus.value = true }, Modifier.weight(1f), badge = if (ReoFenuaUpdate.available.value != null || phoneNotReady) 1 else 0)
         }
     }
 }
@@ -5360,6 +5370,9 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
         ) {
+            SectionTitle("Mon téléphone")
+            ReoFenuaPhoneCard()
+
             SectionTitle(if (ReoFenuaUpdate.available.value != null) "Nouvelle version disponible" else "Mise à jour")
             ReoFenuaUpdateCard()
 
@@ -5393,6 +5406,7 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
 
             SectionTitle("Apparence")
             ReoFenuaStyleSetting()
+            ReoFenuaGestesSetting()
 
             SectionTitle("Réseau")
             PlusButton("Radar : quartier, commune, île") {
@@ -6317,6 +6331,1257 @@ private fun openBatterySaver(context: Context) {
             context.startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         } catch (_: Exception) {
+        }
+    }
+}
+'''
+GESTES_KT = r'''package com.bitchat.android.ui
+
+import android.content.Context
+import android.provider.Settings
+import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+
+// ===================== Les petits gestes =====================
+//
+// Un geste est un simple message privé (« 🐢 Câlin »). Rien d'autre ne circule :
+// l'animation est dessinée par le téléphone qui reçoit. Sur BitChat (iPhone, Android),
+// le geste arrive comme un message normal.
+
+enum class ReoGeste(val wire: String, val label: String, val received: (String) -> String) {
+    BIRD("🐦 Cœur", "Cœur", { n -> "Un cœur de la part de $n ❤️" }),
+    TURTLE("🐢 Câlin", "Câlin", { n -> "Un câlin de la part de $n 🐢" }),
+    DOLPHIN("🐬 Joie", "Joie", { n -> "$n saute de joie 🐬" }),
+    DOG("🐶 Fa'aitoito !", "Courage", { n -> "Fa'aitoito ! De la part de $n" }),
+    CAT("🐱 Bon courage !", "Courage", { n -> "Bon courage, de la part de $n" }),
+    RAINBOW("🌈 Douceur", "Douceur", { n -> "De la douceur de la part de $n 🌈" });
+
+    companion object {
+        fun of(content: String): ReoGeste? {
+            val c = content.trim()
+            return values().firstOrNull { it.wire == c }
+        }
+    }
+}
+
+object ReoFenuaGestes {
+    private const val PREFS = "reo_fenua_guide"
+    private const val KEY_ANIM = "gestes_anim"
+    /** Pas de rafale : un geste toutes les 8 secondes, à l'envoi comme à la réception. */
+    private const val GAP_MS = 8_000L
+    const val OUT_SECONDS = 2.6f
+    const val IN_SECONDS = 3.8f
+
+    class Play(val geste: ReoGeste, val incoming: Boolean, val name: String, val id: Long)
+
+    val playing = mutableStateOf<Play?>(null)
+    val animations = mutableStateOf(true)
+    val lastSent = mutableStateOf(0L)
+    private val lastFrom = HashMap<String, Long>()
+    private var loaded = false
+    private var counter = 0L
+
+    fun load(context: Context) {
+        if (loaded) return
+        loaded = true
+        animations.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ANIM, true)
+    }
+
+    fun setAnimations(context: Context, on: Boolean) {
+        animations.value = on
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ANIM, on).apply()
+    }
+
+    /** Respecte aussi le réglage Android « Supprimer les animations ». */
+    private fun allowed(context: Context): Boolean {
+        load(context)
+        if (!animations.value) return false
+        return try {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    fun canSend(): Boolean = System.currentTimeMillis() - lastSent.value >= GAP_MS
+
+    /** J'envoie un geste : le message part, puis l'animal quitte mon écran. */
+    fun send(context: Context, viewModel: ChatViewModel, geste: ReoGeste, toName: String) {
+        if (!canSend()) return
+        lastSent.value = System.currentTimeMillis()
+        viewModel.sendMessage(geste.wire)
+        if (allowed(context)) {
+            counter += 1
+            playing.value = Play(geste, false, toName, counter)
+        }
+    }
+
+    /** Un message privé vient d'arriver : si c'est un geste, l'animal arrive sur mon écran. */
+    fun incoming(context: Context, content: String, sender: String, senderKey: String) {
+        val geste = ReoGeste.of(content) ?: return
+        if (!allowed(context)) return
+        val now = System.currentTimeMillis()
+        if (now - (lastFrom[senderKey] ?: 0L) < GAP_MS) return
+        val current = playing.value
+        if (current != null && current.incoming) return
+        if (lastFrom.size > 300) lastFrom.clear()
+        lastFrom[senderKey] = now
+        counter += 1
+        playing.value = Play(geste, true, sender.take(24), counter)
+    }
+}
+
+// ---------- Petits outils de dessin (mêmes tracés que les fichiers SVG de départ) ----------
+
+private val pathCache = HashMap<String, Path>()
+
+private fun svg(d: String): Path = pathCache.getOrPut(d) {
+    try {
+        PathParser().parsePathString(d).toPath()
+    } catch (_: Exception) {
+        Path()
+    }
+}
+
+private fun DrawScope.fill(d: String, c: Color, a: Float = 1f) = drawPath(svg(d), c, alpha = a)
+
+private fun DrawScope.line(d: String, c: Color, w: Float, round: Boolean = false, a: Float = 1f) =
+    drawPath(svg(d), c, alpha = a, style = Stroke(width = w, cap = if (round) StrokeCap.Round else StrokeCap.Butt))
+
+private fun DrawScope.oval(cx: Float, cy: Float, rx: Float, ry: Float, c: Color, a: Float = 1f) =
+    drawOval(c, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2f, ry * 2f), alpha = a)
+
+private fun DrawScope.dot(cx: Float, cy: Float, r: Float, c: Color, a: Float = 1f) =
+    drawCircle(c, radius = r, center = Offset(cx, cy), alpha = a)
+
+/** Comme transform="rotate(deg px py)". */
+private fun DrawScope.turn(deg: Float, px: Float, py: Float, block: DrawScope.() -> Unit) =
+    rotate(deg, Offset(px, py)) { block() }
+
+/** Comme transform="translate(x y) rotate(r) scale(s)". [flip] retourne le dessin (regarde à gauche). */
+private fun DrawScope.at(
+    x: Float, y: Float, s: Float = 1f, r: Float = 0f, flip: Boolean = false,
+    block: DrawScope.() -> Unit
+) = translate(x, y) {
+    rotate(r, Offset.Zero) {
+        scale(if (flip) -s else s, s, Offset.Zero) { block() }
+    }
+}
+
+private fun clamp01(v: Float): Float = if (v < 0f) 0f else if (v > 1f) 1f else v
+private fun ease(t: Float): Float = if (t < 0.5f) 2f * t * t else 1f - (-2f * t + 2f).pow(2) / 2f
+private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+private fun sinf(v: Float): Float = sin(v.toDouble()).toFloat()
+private fun cosf(v: Float): Float = cos(v.toDouble()).toFloat()
+private const val PIf = 3.1415927f
+
+private val Red = Color(0xFFDD2E44)
+private val RedDark = Color(0xFFBE1931)
+private val RedDeep = Color(0xFFA0041E)
+private val Orange = Color(0xFFFFAC33)
+private val Ink = Color(0xFF292F33)
+private val HeartRed = Color(0xFFE0213F)
+private val Pastels = listOf(
+    Color(0xFFFFB3BA), Color(0xFFFFDFBA), Color(0xFFFFF5B0), Color(0xFFBAFFC9), Color(0xFFBAE1FF), Color(0xFFD7BAFF)
+)
+
+private const val HEART = "M0 7 C-9 0 -11 -6 -8 -9 C-5 -11 -1 -9 0 -6 C1 -9 5 -11 8 -9 C11 -6 9 0 0 7Z"
+private const val STAR = "M0 -10 L2.5 -2.5 L10 0 L2.5 2.5 L0 10 L-2.5 2.5 L-10 0 L-2.5 -2.5Z"
+private const val PETAL = "M0 0 C-2.6 -1.8 -2.9 -5.6 0 -6.4 C2.9 -5.6 2.6 -1.8 0 0Z"
+private const val WING = "M-4 -6 C-18 -40 -42 -50 -56 -44 C-46 -34 -28 -18 -4 -6Z"
+
+private fun DrawScope.heart(x: Float, y: Float, s: Float, a: Float, c: Color = HeartRed) {
+    if (a <= 0f) return
+    at(x, y, s) { fill(HEART, c, a) }
+}
+
+private fun DrawScope.tiare(x: Float, y: Float, s: Float) = at(x, y, s) {
+    for (i in 0 until 5) turn(72f * i + 10f, 0f, 0f) { fill(PETAL, Color(0xFFFFFDF7)) }
+    dot(0f, 0f, 1.4f, Orange)
+}
+
+private fun DrawScope.feather(rot: Float, a: Float) = turn(rot, 0f, 0f) {
+    fill("M0 -9 C5 -5 5 5 0 9 C-5 5 -5 -5 0 -9Z", Red, a)
+    line("M0 -9 L0 11", RedDeep, 1f, a = a)
+}
+
+// ---------- Les animaux (tournés vers la droite), animés par le temps t en secondes ----------
+
+private fun DrawScope.bird(t: Float, flapping: Boolean) {
+    val a = if (flapping) sinf(t * 28f) * 48f else 10f
+    turn(a * 0.8f - 6f, -4f, -6f) { fill(WING, RedDeep) }
+    fill("M-28 4 L-54 -8 L-50 6 L-56 16 Z", RedDark)
+    oval(0f, 2f, 30f, 19f, Red)
+    oval(8f, 10f, 17f, 8f, Color(0xFFEA596E))
+    dot(26f, -12f, 14f, Red)
+    fill("M20 -24 L27 -40 L33 -24Z", Red)
+    fill("M38 -15 L54 -11 L38 -6Z", Orange)
+    dot(31f, -15f, 3.2f, Ink)
+    dot(32f, -16f, 1f, Color.White)
+    turn(-a - 4f, -2f, -4f) { fill(WING, RedDark) }
+    line("M-4 20 L-6 30 M4 20 L6 30", Orange, 2.4f, round = true)
+}
+
+private fun DrawScope.turtle(t: Float, walking: Boolean) {
+    val w = if (walking) sinf(t * 14f) else 0f
+    val bob = if (walking) abs(sinf(t * 14f)) * -2.5f else 0f
+    val green = Color(0xFF5C913B)
+    val light = Color(0xFF77B255)
+    val dark = Color(0xFF3E721D)
+    translate(0f, bob) {
+        turn(w * 28f, -20f, 8f) { oval(-20f, 17f, 5.5f, 10f, green) }
+        turn(-w * 28f, 16f, 8f) { oval(16f, 17f, 5.5f, 10f, green) }
+        fill("M-36 12 L-44 16 L-34 16Z", green)
+        translate(0f, if (walking) sinf(t * 14f + 1f) * 1.5f else 0f) {
+            line("M30 6 C34 -2 40 -6 46 -4", light, 9f, round = true)
+            dot(47f, -5f, 9f, light)
+            dot(50f, -7f, 2f, Ink)
+            line("M50 -1 Q53 0 55 -2", dark, 1.4f)
+        }
+        fill("M-34 12 C-32 -24 30 -24 34 12 Z", dark)
+        line("M-12 -8 L0 -14 L12 -8 L12 4 L0 10 L-12 4Z", light, 2f)
+        line("M-12 -8 L-24 -2 M12 -8 L24 -2 M-12 4 L-24 8 M12 4 L24 8 M0 10 L0 12", light, 2f)
+        fill("M-33 9 H33 A3 3 0 0 1 33 15 H-33 A3 3 0 0 1 -33 9Z", Color(0xFF2D5216))
+        turn(-w * 28f, -12f, 8f) { oval(-12f, 17f, 5.5f, 10f, green) }
+        turn(w * 28f, 24f, 8f) { oval(24f, 17f, 5.5f, 10f, green) }
+        tiare(-6f, -14f, 0.55f)
+    }
+}
+
+private fun DrawScope.dolphin(t: Float) {
+    val flex = sinf(t * 16f) * 14f
+    val blue = Color(0xFF3B88C3)
+    val deep = Color(0xFF2A6797)
+    fill("M-48 4 C-28 -24 20 -28 44 -8 C52 -2 58 0 66 -1 C60 6 52 8 44 8 C20 20 -22 18 -48 4Z", blue)
+    fill("M-30 8 C-6 18 26 16 44 8 C30 12 0 14 -30 8Z", Color(0xFFBBDDF5))
+    fill("M-6 -20 L4 -40 L14 -18Z", blue)
+    fill("M10 10 L2 26 L20 12Z", deep)
+    turn(flex, -46f, 4f) { fill("M-46 4 L-66 -10 L-60 4 L-66 18Z", deep) }
+    dot(38f, -6f, 2.8f, Color(0xFF14324C))
+    dot(39f, -7f, 0.9f, Color.White)
+    line("M52 2 Q56 4 60 2", Color(0xFF14324C), 1.4f)
+}
+
+private fun DrawScope.dog(t: Float, sitting: Boolean) {
+    val wag = sinf(t * (if (sitting) 22f else 16f)) * 28f
+    val hop = if (!sitting) -abs(sinf(t * 12f)) * 12f else 0f
+    val blink = if (sitting && (t % 2.2f) > 2.05f) 0.15f else 1f
+    val tilt = if (sitting) sinf(t * 3f) * 6f else 0f
+    val fur = Color(0xFFD99E5A)
+    val cream = Color(0xFFF2D2A9)
+    val ear = Color(0xFF8A5A2B)
+    translate(0f, hop) {
+        turn(wag, 18f, 26f) { line("M18 26 C30 22 34 8 30 0", Color(0xFFB9763A), 7f, round = true) }
+        oval(0f, 26f, 24f, 20f, fur)
+        oval(-10f, 42f, 8f, 5f, Color(0xFFC98A47))
+        oval(10f, 42f, 8f, 5f, Color(0xFFC98A47))
+        oval(0f, 30f, 12f, 12f, cream)
+        turn(tilt, 0f, -8f) {
+            turn(-12f + sinf(t * 9f) * 6f, -16f, -20f) { oval(-20f, -8f, 8f, 15f, ear) }
+            turn(12f - sinf(t * 9f) * 6f, 16f, -20f) { oval(20f, -8f, 8f, 15f, ear) }
+            dot(0f, -10f, 20f, fur)
+            oval(0f, -2f, 11f, 8f, cream)
+            oval(0f, -6f, 4f, 3f, Ink)
+            line("M-4 0 Q0 4 4 0", Ink, 1.5f)
+            oval(0f, 5f, 3.5f, if (sitting) 4.5f else 3f, Color(0xFFF27E8A))
+            oval(-7f, -14f, 2.8f, 3f * blink, Ink)
+            oval(7f, -14f, 2.8f, 3f * blink, Ink)
+            tiare(-18f, -24f, 0.6f)
+        }
+    }
+}
+
+private fun DrawScope.cat(t: Float, sitting: Boolean) {
+    val swish = sinf(t * (if (sitting) 5f else 10f)) * 30f
+    val hop = if (!sitting) -abs(sinf(t * 12f)) * 10f else 0f
+    val blink = if (sitting && (t % 2.6f) > 2.45f) 0.1f else 1f
+    val fur = Orange
+    val dark = Color(0xFFF4900C)
+    val pink = Color(0xFFF7B1BC)
+    translate(0f, hop) {
+        turn(swish, 16f, 34f) { line("M16 34 C34 34 40 18 34 4", dark, 6f, round = true) }
+        oval(0f, 26f, 20f, 20f, fur)
+        oval(-8f, 43f, 7f, 4f, dark)
+        oval(8f, 43f, 7f, 4f, dark)
+        line("M-8 14 L-4 34 M8 14 L4 34", dark, 3f)
+        fill("M-18 -18 L-16 -40 L-2 -26Z", fur)
+        fill("M18 -18 L16 -40 L2 -26Z", fur)
+        fill("M-14 -22 L-14 -34 L-6 -26Z", pink)
+        fill("M14 -22 L14 -34 L6 -26Z", pink)
+        dot(0f, -10f, 19f, fur)
+        line("M-6 -27 L-4 -20 M0 -28 L0 -21 M6 -27 L4 -20", dark, 2.4f)
+        oval(-7f, -12f, 3f, 4f * blink, Ink)
+        oval(7f, -12f, 3f, 4f * blink, Ink)
+        fill("M-2 -4 L2 -4 L0 -1Z", Color(0xFFE86A8A))
+        line("M0 -1 Q-3 3 -6 1 M0 -1 Q3 3 6 1", Ink, 1.3f)
+        line("M-8 -3 L-24 -6 M-8 -1 L-24 1 M8 -3 L24 -6 M8 -1 L24 1", Color(0xFF7A5A2B), 1f, a = 0.7f)
+        tiare(16f, -30f, 0.55f)
+    }
+}
+
+private fun DrawScope.rainbowIcon() {
+    for (i in 0 until 6) {
+        val r = 40f - i * 5f
+        drawArc(
+            color = Pastels[i], startAngle = 180f, sweepAngle = 180f, useCenter = false,
+            topLeft = Offset(-r, 14f - r), size = Size(r * 2f, r * 2f), style = Stroke(5.5f)
+        )
+    }
+    oval(-34f, 16f, 12f, 7f, Color.White)
+    oval(34f, 16f, 12f, 7f, Color.White)
+}
+
+private fun DrawScope.cloud(x: Float, y: Float, a: Float) {
+    if (a <= 0f) return
+    oval(x, y, 34f, 16f, Color.White, a)
+    oval(x - 18f, y - 8f, 18f, 14f, Color.White, a)
+    oval(x + 14f, y - 12f, 20f, 16f, Color.White, a)
+}
+
+private fun DrawScope.splash(cx: Float, cy: Float, a: Float) {
+    val water = Color(0xFF7FCCD0)
+    for (i in 0 until 9) {
+        val ang = -PIf * (0.15f + 0.7f * i / 8f)
+        val v = 60f + (i % 3) * 20f
+        dot(cx + cosf(ang) * v * a, cy + sinf(ang) * v * a + 90f * a * a, 4f + (i % 3), water, 1f - a)
+    }
+    drawOval(
+        water, topLeft = Offset(cx - (20f + 70f * a), cy + 18f - (5f + 12f * a)),
+        size = Size(2f * (20f + 70f * a), 2f * (5f + 12f * a)), alpha = 1f - a, style = Stroke(3f)
+    )
+}
+
+/** Arc-en-ciel pastel qui pousse le long d'une courbe (départ, sommet, arrivée). */
+private fun DrawScope.rainbow(x0: Float, y0: Float, cx: Float, cy: Float, x1: Float, y1: Float, grow: Float, a: Float) {
+    if (grow <= 0f || a <= 0f) return
+    val n = 40
+    val m = maxOf(1, (n * ease(grow)).toInt())
+    for (i in 0 until 6) {
+        val dy = i * 9f
+        val p = Path()
+        for (k in 0..m) {
+            val u = k / n.toFloat()
+            val aa = (1f - u) * (1f - u)
+            val bb = 2f * u * (1f - u)
+            val cc = u * u
+            val px = aa * x0 + bb * cx + cc * x1
+            val py = aa * (y0 + dy) + bb * (cy + dy) + cc * (y1 + dy)
+            if (k == 0) p.moveTo(px, py) else p.lineTo(px, py)
+        }
+        drawPath(p, Pastels[i], alpha = 0.95f * a, style = Stroke(10f, cap = StrokeCap.Round))
+    }
+}
+
+private fun DrawScope.animal(g: ReoGeste, t: Float, moving: Boolean) {
+    when (g) {
+        ReoGeste.BIRD -> bird(t, moving)
+        ReoGeste.TURTLE -> turtle(t, moving)
+        ReoGeste.DOLPHIN -> dolphin(t)
+        ReoGeste.DOG -> dog(t, !moving)
+        ReoGeste.CAT -> cat(t, !moving)
+        ReoGeste.RAINBOW -> rainbowIcon()
+    }
+}
+
+// ---------- Les scènes. Unités : largeur de l'écran = 282, hauteur = h. ----------
+
+/** Je viens d'envoyer : l'animal part de chez moi. */
+private fun DrawScope.sceneOut(g: ReoGeste, t: Float, h: Float) {
+    val sx = 141f
+    val sy = h - 150f
+    val out = clamp01((t - 0.2f) / 1.3f)
+    when (g) {
+        ReoGeste.BIRD -> {
+            val e = ease(out)
+            val rise = sy + 90f
+            for (i in 0 until 7) {
+                val b = 0.3f + i * 0.15f
+                if (t > b) {
+                    val a = t - b
+                    val q = (b - 0.2f) / 1.3f
+                    at(sx + q * 90f + sinf(a * 5f + i) * 14f, sy - q * rise + a * 70f) {
+                        feather(a * 200f + i * 40f, clamp01(1f - a / 1.6f))
+                    }
+                }
+            }
+            at(sx + e * 90f, sy - e * rise, 0.8f + 0.2f * e, -25f * e) { bird(t, t > 0.15f) }
+        }
+        ReoGeste.TURTLE -> at(sx - 20f + out * 240f, sy, 1.25f) { turtle(t, true) }
+        ReoGeste.DOLPHIN -> {
+            val j = clamp01((t - 0.2f) / 1.4f)
+            fun px(u: Float) = lerp(sx - 30f, 282f + 90f, u)
+            fun py(u: Float) = sy - 300f * sinf(PIf * u * 0.8f)
+            val r = atan2(py(j + 0.01f) - py(j), px(j + 0.01f) - px(j)) * 180f / PIf
+            if (t > 0.1f && t < 1.2f) splash(sx - 30f, sy + 20f, clamp01((t - 0.1f) / 1.1f))
+            at(px(j), py(j), 1.15f, r) { dolphin(t) }
+        }
+        ReoGeste.DOG -> at(sx - 10f + out * 250f, sy - 20f, 1.3f) { dog(t, false) }
+        ReoGeste.CAT -> at(sx - 10f + out * 250f, sy - 20f, 1.3f) { cat(t, false) }
+        ReoGeste.RAINBOW -> {
+            val grow = clamp01((t - 0.1f) / 1.4f)
+            val fade = 1f - clamp01((t - 1.9f) / 0.5f)
+            rainbow(sx, sy, sx + 40f, sy - 330f, 282f + 60f, sy - 380f, grow, fade)
+            cloud(sx, sy + 30f, clamp01(t / 0.3f) * fade)
+        }
+    }
+}
+
+/** Je reçois : l'animal arrive chez moi et fait son geste. */
+private fun DrawScope.sceneIn(g: ReoGeste, t: Float, h: Float) {
+    val cx = 141f
+    val cy = h * 0.52f
+    val inn = clamp01(t / 1.2f)
+    val act = clamp01((t - 1.2f) / 1.4f)
+    val gone = 1f - clamp01((t - 3.3f) / 0.4f)
+    when (g) {
+        ReoGeste.BIRD -> {
+            val e = ease(inn)
+            val x = 60f + e * 80f
+            var y = -70f + e * (cy + 70f)
+            if (act > 0f) y = cy - 10f * sinf(act * PIf * 3f)
+            for (i in 0 until 4) {
+                val b = 0.1f + i * 0.25f
+                if (t > b && t < 1.9f) {
+                    val a = t - b
+                    val q = b / 1.2f
+                    at(60f + q * 80f + sinf(a * 5f + i) * 12f, -70f + q * (cy + 70f) + a * 60f) {
+                        feather(a * 180f + i * 50f, clamp01(1f - a / 1.5f))
+                    }
+                }
+            }
+            at(x, y, 1f, if (act > 0f) 0f else 20f * (1f - e)) { bird(t, act < 0.6f || act >= 1f) }
+            if (act > 0f) {
+                val pts = listOf(-40f to -50f, 0f to -75f, 40f to -50f)
+                for (i in pts.indices) {
+                    val q = clamp01(act * 1.6f - i * 0.2f)
+                    heart(x + pts[i].first * q, y - 20f + pts[i].second * q, 1f + q, q * gone)
+                }
+            }
+        }
+        ReoGeste.TURTLE -> {
+            var x = -70f + ease(inn) * 210f
+            var s = 1.25f
+            if (act > 0f) {
+                x = 140f
+                s = 1.25f + 0.15f * sinf(minOf(act, 0.6f) / 0.6f * PIf / 2f)
+            }
+            at(x, cy + 40f, s) { turtle(t, act <= 0f) }
+            if (act > 0f) {
+                val q = clamp01(act * 1.5f)
+                heart(x + 30f, cy - 20f, 1f + q * 1.4f, q * gone)
+                heart(x - 30f, cy, 0.6f + q, q * 0.8f * gone)
+            }
+        }
+        ReoGeste.DOLPHIN -> {
+            val j = clamp01(t / 1.6f)
+            val gx = 150f
+            val gy = cy + 30f
+            fun px(u: Float) = lerp(-90f, gx, u)
+            fun py(u: Float) = lerp(gy + 60f, gy, u) - 280f * sinf(PIf * u)
+            var x = px(j)
+            var y = py(j)
+            var r = atan2(py(minOf(1f, j + 0.01f)) - y, px(minOf(1f, j + 0.01f)) - x) * 180f / PIf
+            if (t > 1.7f) {
+                val a = clamp01((t - 1.7f) / 1.2f)
+                x = gx
+                y = gy - 50f * abs(sinf(a * PIf * 2f))
+                r = sinf(a * PIf * 2f) * 25f
+            }
+            if (t > 1.5f && t < 2.8f) splash(gx, gy + 20f, clamp01((t - 1.5f) / 1.3f))
+            at(x, y, 1.15f, r) { dolphin(t) }
+            if (t > 2f) {
+                val q = clamp01((t - 2f) / 0.5f)
+                at(gx + 44f, gy - 70f, 1.2f + q) { fill(STAR, Color(0xFFFFE29A), q * gone) }
+            }
+        }
+        ReoGeste.DOG, ReoGeste.CAT -> {
+            val sit = act > 0f
+            val x = if (sit) 140f else -60f + ease(inn) * 200f
+            at(x, cy + 30f, 1.45f) { if (g == ReoGeste.DOG) dog(t, sit) else cat(t, sit) }
+            if (sit) {
+                val q = clamp01(act * 1.8f)
+                heart(x + 46f, cy - 40f, 0.8f + q * 0.8f, q * gone)
+            }
+        }
+        ReoGeste.RAINBOW -> {
+            val x1 = 150f
+            val y1 = cy + 20f
+            val grow = clamp01(t / 1.6f)
+            rainbow(-30f, cy + 90f, 40f, cy - 330f, x1, y1, grow, gone)
+            if (grow > 0.9f) cloud(x1, y1 + 30f, clamp01((grow - 0.9f) / 0.1f) * gone)
+            if (t > 1.7f) {
+                val q = clamp01((t - 1.7f) / 0.6f)
+                val pts = listOf(-36f to -36f, 0f to -60f, 36f to -36f)
+                val cols = listOf(Pastels[0], Pastels[4], Pastels[5])
+                for (i in pts.indices) {
+                    val qq = clamp01(q * 1.5f - i * 0.2f)
+                    heart(x1 + pts[i].first * qq, y1 - 10f + pts[i].second * qq, 0.6f + qq * 0.7f, qq * gone, cols[i])
+                }
+            }
+        }
+    }
+}
+
+// ---------- Ce qui s'affiche ----------
+
+/**
+ * Couche des petits gestes. Sur l'écran principal ([peerID] nul) : seulement l'animation reçue.
+ * Dans une conversation privée : aussi le bouton pour en envoyer (mode stylisé).
+ * Ne capte aucun toucher : on peut continuer à écrire pendant l'animation.
+ */
+@Composable
+fun BoxScope.ReoFenuaGestesLayer(viewModel: ChatViewModel, peerID: String?, peerName: String) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    ReoFenuaGestes.load(context)
+    val play = ReoFenuaGestes.playing.value
+    var time by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(play?.id) {
+        val p = play ?: return@LaunchedEffect
+        val total = if (p.incoming) ReoFenuaGestes.IN_SECONDS else ReoFenuaGestes.OUT_SECONDS
+        time = 0f
+        var start = 0L
+        var buzzed = false
+        if (p.incoming) {
+            try {
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            } catch (_: Exception) {
+            }
+        }
+        while (time < total) {
+            withFrameNanos { now ->
+                if (start == 0L) start = now
+                time = (now - start) / 1_000_000_000f
+            }
+            // petite vibration douce au moment du geste (cœur, câlin…)
+            if (p.incoming && !buzzed && time > 1.3f) {
+                buzzed = true
+                try {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                } catch (_: Exception) {
+                }
+            }
+        }
+        if (ReoFenuaGestes.playing.value?.id == p.id) ReoFenuaGestes.playing.value = null
+    }
+
+    if (play != null) {
+        val t = time
+        Canvas(
+            modifier = Modifier
+                .matchParentSize()
+                .zIndex(20f)
+        ) {
+            val k = size.width / 282f
+            val h = size.height / k
+            scale(k, k, Offset.Zero) {
+                if (play.incoming) sceneIn(play.geste, t, h) else sceneOut(play.geste, t, h)
+            }
+        }
+        val total = if (play.incoming) ReoFenuaGestes.IN_SECONDS else ReoFenuaGestes.OUT_SECONDS
+        val from = if (play.incoming) 1.5f else 1.3f
+        val a = clamp01((t - from) / 0.3f) * (1f - clamp01((t - (total - 0.35f)) / 0.3f))
+        if (a > 0f) {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(18.dp),
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .zIndex(21f)
+                    .padding(start = 24.dp, end = 24.dp, top = 190.dp)
+                    .graphicsLayer { alpha = a }
+            ) {
+                Text(
+                    text = if (play.incoming) play.geste.received(play.name) else "Envoyé à ${play.name}",
+                    color = Color(0xFF0B3C5D),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+        }
+    }
+
+    // Bouton d'envoi : seulement en mode stylisé, dans une conversation privée
+    if (peerID == null || !ReoFenuaStyle.stylised) return
+    var open by remember { mutableStateOf(false) }
+    val ready = ReoFenuaGestes.canSend() || ReoFenuaGestes.lastSent.value == 0L
+    if (open) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(22.dp),
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .zIndex(22f)
+                .padding(start = 10.dp, end = 10.dp, bottom = 136.dp)
+        ) {
+            Column(modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp)) {
+                Text(
+                    text = "Envoyer un petit geste à $peerName",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    for (g in ReoGeste.values()) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    open = false
+                                    ReoFenuaGestes.send(context, viewModel, g, peerName)
+                                }
+                                .semantics { contentDescription = "Envoyer : " + g.label }
+                                .padding(horizontal = 4.dp, vertical = 6.dp)
+                        ) {
+                            Canvas(modifier = Modifier.size(42.dp)) {
+                                val s = size.width / 130f
+                                at(size.width / 2f, size.height / 2f, s) { animal(g, 0.3f, false) }
+                            }
+                            Text(text = g.label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = CircleShape,
+        shadowElevation = 4.dp,
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .zIndex(22f)
+            .padding(end = 10.dp, bottom = 84.dp)
+            .size(46.dp)
+            .graphicsLayer { alpha = if (ready) 1f else 0.45f }
+            .clip(CircleShape)
+            .clickable(enabled = ready) { open = !open }
+            .semantics { contentDescription = "Petits gestes" }
+    ) {
+        Canvas(modifier = Modifier.padding(6.dp)) {
+            val s = size.width / 125f
+            at(size.width / 2f, size.height / 2f + 3f * s, s) { bird(0f, false) }
+        }
+    }
+    // Le bouton se réactive tout seul après la petite attente
+    val sentAt = ReoFenuaGestes.lastSent.value
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(sentAt, tick) {
+        if (!ReoFenuaGestes.canSend()) {
+            kotlinx.coroutines.delay(1000)
+            tick += 1
+        }
+    }
+}
+
+/** Réglage (Plus → Apparence) : garder ou couper les animations des petits gestes. */
+@Composable
+fun ReoFenuaGestesSetting() {
+    val context = LocalContext.current
+    ReoFenuaGestes.load(context)
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "🐢 Animations des petits gestes",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Quand un proche vous envoie un cœur ou un câlin, un petit animal traverse l'écran. " +
+                        "Sans animation, vous recevez seulement le message.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = ReoFenuaGestes.animations.value,
+                onCheckedChange = { ReoFenuaGestes.setAnimations(context, it) }
+            )
+        }
+    }
+}
+'''
+PHONE_KT = r'''package com.bitchat.android.ui
+
+import android.Manifest
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+
+// ===================== Préparer mon téléphone =====================
+
+/** Ce dont Reo Fenua a besoin pour marcher, vérifié en direct sur le téléphone. Rien n'est envoyé nulle part. */
+object ReoFenuaPhone {
+    enum class Need { PERMS, BLUETOOTH, LOCATION, NOTIFS, BATTERY }
+
+    class Item(val need: Need, val title: String, val why: String, val ok: Boolean, val important: Boolean)
+
+    /** Change à chaque retour dans l'app, pour rafraîchir l'écran. */
+    val refresh = mutableStateOf(0)
+
+    fun runtimePermissions(): List<String> {
+        val l = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            l.add(Manifest.permission.BLUETOOTH_SCAN)
+            l.add(Manifest.permission.BLUETOOTH_CONNECT)
+            l.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        }
+        l.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        l.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        return l
+    }
+
+    private fun granted(context: Context, p: String) =
+        ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
+
+    fun missingPermissions(context: Context): List<String> = runtimePermissions().filter { !granted(context, it) }
+
+    fun bluetoothOn(context: Context): Boolean = try {
+        (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter?.isEnabled == true
+    } catch (_: Exception) {
+        false
+    }
+
+    fun locationOn(context: Context): Boolean = try {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) lm.isLocationEnabled
+        else lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    } catch (_: Exception) {
+        true
+    }
+
+    fun notificationsOn(context: Context): Boolean = try {
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    } catch (_: Exception) {
+        true
+    }
+
+    fun batteryFree(context: Context): Boolean = try {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
+    } catch (_: Exception) {
+        true
+    }
+
+    fun items(context: Context): List<Item> = listOf(
+        Item(
+            Need.PERMS, "Autorisations de Reo Fenua",
+            "Pour trouver les téléphones autour de vous par Bluetooth. Android appelle cela « appareils à proximité » et « position ». " +
+                "Reo Fenua n'enregistre pas et n'envoie pas votre position.",
+            missingPermissions(context).isEmpty(), true
+        ),
+        Item(Need.BLUETOOTH, "Bluetooth allumé", "C'est lui qui transporte les messages, sans réseau.", bluetoothOn(context), true),
+        Item(Need.LOCATION, "Localisation allumée", "Android l'exige pour chercher les téléphones Bluetooth autour.", locationOn(context), true),
+        Item(Need.NOTIFS, "Notifications", "Pour être prévenu d'un message ou d'une ALERTE, même écran éteint.", notificationsOn(context), false),
+        Item(
+            Need.BATTERY, "Rester actif en arrière-plan",
+            "Sinon le téléphone endort Reo Fenua et les messages n'arrivent plus quand l'écran est éteint.",
+            batteryFree(context), false
+        )
+    )
+
+    /** Vrai si l'essentiel manque (Reo Fenua ne peut pas fonctionner). */
+    fun notReady(context: Context): Boolean = items(context).any { it.important && !it.ok }
+
+    fun openAppSettings(context: Context) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    fun open(context: Context, action: String, withPackage: Boolean = false) {
+        try {
+            val i = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (withPackage) i.data = Uri.parse("package:" + context.packageName)
+            context.startActivity(i)
+        } catch (_: Exception) {
+            openAppSettings(context)
+        }
+    }
+
+    fun openNotificationSettings(context: Context) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+            openAppSettings(context)
+        }
+    }
+}
+
+/** Carte « Préparer mon téléphone » : chaque point en vert ou en rouge, et un seul gros bouton. */
+@Composable
+fun ReoFenuaPhoneCard() {
+    val context = LocalContext.current
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) ReoFenuaPhone.refresh.value += 1
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val tick = ReoFenuaPhone.refresh.value
+    val items = remember(tick) { ReoFenuaPhone.items(context) }
+    var asked by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf("") }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        ReoFenuaPhone.refresh.value += 1
+        if (res.values.any { !it }) {
+            info = "Android n'a pas tout accordé. Touchez encore le bouton : il ouvrira les réglages de Reo Fenua, " +
+                "puis « Autorisations », et mettez tout sur « Autoriser »."
+        }
+    }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        ReoFenuaPhone.refresh.value += 1
+    }
+
+    /** Règle le premier point qui ne va pas. On appuie de nouveau pour le suivant. */
+    fun fixNext() {
+        info = ""
+        val next = items.firstOrNull { !it.ok } ?: return
+        when (next.need) {
+            ReoFenuaPhone.Need.PERMS -> {
+                if (!asked) {
+                    asked = true
+                    permLauncher.launch(ReoFenuaPhone.missingPermissions(context).toTypedArray())
+                } else {
+                    ReoFenuaPhone.openAppSettings(context)
+                }
+            }
+            ReoFenuaPhone.Need.BLUETOOTH -> {
+                val ok = try {
+                    context.startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+                if (!ok) ReoFenuaPhone.open(context, Settings.ACTION_BLUETOOTH_SETTINGS)
+            }
+            ReoFenuaPhone.Need.LOCATION -> ReoFenuaPhone.open(context, Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            ReoFenuaPhone.Need.NOTIFS -> {
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                    !asked
+                ) {
+                    asked = true
+                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    ReoFenuaPhone.openNotificationSettings(context)
+                }
+            }
+            ReoFenuaPhone.Need.BATTERY -> {
+                @Suppress("BatteryLife")
+                ReoFenuaPhone.open(context, Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, withPackage = true)
+            }
+        }
+    }
+
+    val left = items.count { !it.ok }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = if (left == 0) "📱 Votre téléphone est prêt" else "📱 Préparer mon téléphone",
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            for (item in items) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(text = if (item.ok) "✅" else if (item.important) "❌" else "⚠️", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = item.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        if (!item.ok) Text(text = item.why, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (info.isNotEmpty()) Text(text = info, fontSize = 14.sp, color = MaterialTheme.colorScheme.error)
+            if (left > 0) {
+                Button(
+                    onClick = { fixNext() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
+                ) {
+                    Text(text = if (left == items.size) "Tout préparer" else "Continuer ($left à régler)", fontSize = 18.sp)
+                }
+                Text(
+                    text = "Touchez le bouton, acceptez ce qu'Android demande, puis revenez ici. Recommencez jusqu'à ce que tout soit vert.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+// ===================== Partager un texte vers Reo Fenua =====================
+
+/**
+ * Porte d'entrée du menu « Partager » d'Android. Elle ne montre rien : elle lit le texte,
+ * le nettoie, le garde en mémoire (jamais sur le disque) puis ouvre Reo Fenua.
+ * Rien n'est envoyé ici.
+ */
+class ReoFenuaShareActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            val i = intent
+            if (i != null && i.action == Intent.ACTION_SEND && (i.type ?: "").startsWith("text/plain")) {
+                val raw = i.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                val clean = ReoFenuaShare.clean(raw ?: "")
+                if (clean.isNotEmpty()) ReoFenuaShare.pending.value = clean
+            }
+        } catch (_: Exception) {
+            // contenu illisible ou piégé : on l'ignore
+        }
+        try {
+            startActivity(
+                Intent(this, com.bitchat.android.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            )
+        } catch (_: Exception) {
+        }
+        finish()
+    }
+}
+
+object ReoFenuaShare {
+    const val MAX = 2000
+    /** Texte reçu, en attente du choix de la personne. Seulement en mémoire. */
+    val pending = mutableStateOf<String?>(null)
+
+    /**
+     * Reo Fenua n'apparaît dans le menu « Partager » d'Android qu'en mode complet ou stylisé.
+     * En mode simple, la porte d'entrée est fermée : moins de choix, moins d'erreurs.
+     */
+    fun sync(context: Context, simple: Boolean) {
+        try {
+            val pm = context.packageManager
+            val comp = android.content.ComponentName(context, ReoFenuaShareActivity::class.java)
+            val want = if (simple) PackageManager.COMPONENT_ENABLED_STATE_DISABLED else PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            if (pm.getComponentEnabledSetting(comp) != want) pm.setComponentEnabledSetting(comp, want, PackageManager.DONT_KILL_APP)
+        } catch (_: Exception) {
+        }
+        if (simple) pending.value = null
+    }
+
+    /** Retire les caractères invisibles ou trompeurs et limite la longueur. */
+    fun clean(text: String): String {
+        val sb = StringBuilder()
+        for (ch in text) {
+            val bad = (ch.code < 0x20 && ch != '\n' && ch != '\t') || ch.code == 0x7F ||
+                ch in '‪'..'‮' || ch in '⁦'..'⁩' || ch == '‎' || ch == '‏' ||
+                ch == '؜' || ch == '﻿' || ch == '⁣'
+            if (!bad) sb.append(ch)
+        }
+        var s = sb.toString().replace(Regex("\n{3,}"), "\n\n").trim()
+        if (s.length > MAX) s = s.take(MAX).trimEnd() + "…"
+        // Un texte qui commence par « / » serait lu comme une commande : on le neutralise.
+        if (s.startsWith("/")) s = " $s"
+        return s
+    }
+
+    /** Numéro de téléphone ou adresse : on prévient avant un envoi public. */
+    fun looksPrivate(text: String): Boolean =
+        Regex("(\\+?689)?\\s?[48]\\d([ .]?\\d{2}){3}").containsMatchIn(text) ||
+            Regex("\\d{6,}").containsMatchIn(text.replace(" ", "")) ||
+            Regex("(?i)\\b(rue|avenue|servitude|pk ?\\d|lotissement|résidence|bp ?\\d)").containsMatchIn(text)
+}
+
+/** Écran « À qui envoyer ? », puis « Vérifier avant d'envoyer ». */
+@Composable
+fun ReoFenuaShareHost(viewModel: ChatViewModel) {
+    val text = ReoFenuaShare.pending.value ?: return
+    // Le partage n'existe pas en mode simple
+    if (ReoFenuaMode.simple.value) {
+        ReoFenuaShare.pending.value = null
+        return
+    }
+    // Pas avant d'avoir déverrouillé ni avant la fin de l'accueil
+    if (ReoFenuaLock.locked.value) return
+    if (ReoFenuaGuide.showIntro.value || ReoFenuaName.needsAsk.value || ReoFenuaCharter.needs.value || ReoFenuaMove.show.value) return
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        ReoFenuaContacts.load(context)
+        ReoFenuaBlock.load(context)
+    }
+    val chats by viewModel.privateChats.collectAsState()
+    val nicknames by viewModel.peerNicknames.collectAsState()
+    val myNick by viewModel.nickname.collectAsState()
+    val people = remember(chats, nicknames, myNick) {
+        reoKnownPeople(chats, nicknames, viewModel.myPeerID, myNick).filter { !ReoFenuaBlock.isBlocked(it.first) }
+    }
+    val simple = ReoFenuaMode.simple.value
+    var body by remember(text) { mutableStateOf(text) }
+    // null = on choisit ; "" = tout le monde à proximité ; sinon l'identifiant du proche
+    var to by remember(text) { mutableStateOf<String?>(null) }
+    var showPublic by remember(text) { mutableStateOf(true) }
+    var sending by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf("") }
+    fun close() {
+        ReoFenuaShare.pending.value = null
+    }
+
+    Dialog(onDismissRequest = { if (!sending) close() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.padding(12.dp)) {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                val dest = to
+                if (dest == null) {
+                    Text(text = "À qui envoyer ?", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                        Text(
+                            text = if (text.length > 160) text.take(160) + "…" else text,
+                            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    if (people.isEmpty()) {
+                        Text(
+                            text = "Vous n'avez pas encore de proches dans Reo Fenua. Écrivez d'abord à quelqu'un autour de vous.",
+                            fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                    for ((id, name) in people.take(30)) {
+                        Button(onClick = { to = id }, modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)) {
+                            ReoFenuaAvatar(key = id, name = name, size = 36.dp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(text = ReoFenuaContacts.nameFor(id, name), fontSize = 18.sp, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    if (showPublic) {
+                        Surface(color = Color(0xFFFFE3D6), shape = MaterialTheme.shapes.large) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                                TextButton(onClick = { to = "" }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("👥 Tout le monde à proximité", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF9C3B2E))
+                                        Text("⚠ Des inconnus verront ce message", fontSize = 14.sp, color = Color(0xFF9C3B2E))
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        TextButton(onClick = { showPublic = true }) {
+                            Text("Envoyer à tout le monde à proximité…", fontSize = 14.sp)
+                        }
+                    }
+                    OutlinedButton(onClick = { close() }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                        Text("Annuler", fontSize = 17.sp)
+                    }
+                } else {
+                    val isPublic = dest.isEmpty()
+                    val name = if (isPublic) "tout le monde à proximité"
+                    else ReoFenuaContacts.nameFor(dest, people.firstOrNull { it.first == dest }?.second ?: "?")
+                    Text(text = "Vérifier avant d'envoyer", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    OutlinedTextField(
+                        value = body,
+                        onValueChange = { v -> body = v.take(ReoFenuaShare.MAX) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 17.sp)
+                    )
+                    if (isPublic) {
+                        Text(
+                            text = "⚠ Ce message sera lisible par toutes les personnes autour de vous, même inconnues. Il n'est pas chiffré.",
+                            fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF9C3B2E)
+                        )
+                        if (ReoFenuaShare.looksPrivate(body)) {
+                            Text(
+                                text = "Ce texte semble contenir un numéro ou une adresse. Voulez-vous vraiment le montrer à tout le monde ?",
+                                fontSize = 15.sp, color = Color(0xFF9C3B2E)
+                            )
+                        }
+                    }
+                    Text(text = "Vérifiez la source avant de diffuser une alerte.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (info.isNotEmpty()) Text(text = info, fontSize = 15.sp, color = MaterialTheme.colorScheme.error)
+                    Button(
+                        enabled = !sending && body.isNotBlank(),
+                        onClick = {
+                            val content = ReoFenuaShare.clean(body)
+                            if (content.isEmpty()) return@Button
+                            sending = true
+                            info = ""
+                            scope.launch {
+                                val before = viewModel.selectedPrivateChatPeer.value
+                                if (before != null) viewModel.endPrivateChat()
+                                if (isPublic) {
+                                    // Seulement sur le réseau Bluetooth de proximité, jamais dans un salon ni par internet
+                                    val loc = viewModel.selectedLocationChannel.value
+                                    val meshOnly = viewModel.currentChannel.value == null &&
+                                        (loc == null || loc is com.bitchat.android.geohash.ChannelID.Mesh)
+                                    if (!meshOnly) {
+                                        info = "Revenez d'abord sur « À proximité » (pas dans un salon), puis réessayez."
+                                    } else {
+                                        viewModel.sendMessage(content)
+                                        kotlinx.coroutines.delay(400)
+                                        close()
+                                    }
+                                } else {
+                                    try {
+                                        viewModel.startPrivateChat(dest)
+                                    } catch (_: Exception) {
+                                    }
+                                    // Sécurité : jamais d'envoi si la conversation privée n'est pas bien ouverte
+                                    if (viewModel.selectedPrivateChatPeer.value == null) {
+                                        info = "Impossible d'écrire à cette personne pour le moment. Réessayez quand elle sera autour de vous."
+                                    } else {
+                                        viewModel.sendMessage(content)
+                                        kotlinx.coroutines.delay(1200)
+                                        viewModel.endPrivateChat()
+                                        close()
+                                    }
+                                }
+                                if (before != null && viewModel.selectedPrivateChatPeer.value == null) {
+                                    try {
+                                        viewModel.startPrivateChat(before)
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                sending = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
+                    ) {
+                        Text(text = if (sending) "Envoi…" else "Envoyer à $name", fontSize = 18.sp)
+                    }
+                    TextButton(onClick = { to = null; info = "" }, modifier = Modifier.fillMaxWidth()) {
+                        Text("← Choisir quelqu'un d'autre", fontSize = 15.sp)
+                    }
+                    OutlinedButton(onClick = { close() }, enabled = !sending, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                        Text("Annuler", fontSize = 17.sp)
+                    }
+                }
+            }
         }
     }
 }
@@ -7625,6 +8890,8 @@ if tokens.exists():
 (UI / "ReoFenuaEmoji.kt").write_text(EMOJI_KT)
 (UI / "ReoFenuaSafety.kt").write_text(SAFETY_KT)
 (UI / "ReoFenuaUrgence.kt").write_text(URGENCE_KT)
+(UI / "ReoFenuaGestes.kt").write_text(GESTES_KT)
+(UI / "ReoFenuaPhone.kt").write_text(PHONE_KT)
 (UI / "ReoFenuaVault.kt").write_text(VAULT_KT)
 (UI / "ReoFenuaStyle.kt").write_text(STYLE_KT)
 import base64 as _b64
@@ -8136,3 +9403,40 @@ if t.count(old_p) == 1:
     print("Effacement d'urgence : données Reo Fenua incluses.")
 else:
     warn("Effacement d'urgence : emplacement introuvable.")
+
+# ---------- 12. Petits gestes : bouton et animation dans la conversation privée ----------
+mps = UI / "MeshPeerListSheet.kt"
+t = mps.read_text() if mps.exists() else ""
+old_h = "                // Header. Built from the same tokens as the main chat header rather than a\n"
+if t.count(old_h) == 1 and "fun PrivateChatSheet(" in t:
+    t = t.replace(old_h, "                ReoFenuaGestesLayer(viewModel = viewModel, peerID = peerID, peerName = titleText)\n\n" + old_h)
+    mps.write_text(t)
+    print("Petits gestes ajoutés à la conversation privée.")
+else:
+    warn("Petits gestes : emplacement introuvable dans la conversation privée.")
+
+# ---------- 13. Partager un texte vers Reo Fenua (menu « Partager » d'Android) ----------
+man = pathlib.Path("app/src/main/AndroidManifest.xml")
+m = man.read_text()
+if "ReoFenuaShareActivity" not in m and m.count("    </application>") == 1:
+    m = m.replace("    </application>", """        <!-- Reo Fenua : reçoit seulement du texte, n'envoie rien tout seul -->
+        <activity
+            android:name=".ui.ReoFenuaShareActivity"
+            android:exported="true"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="Reo Fenua"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+    </application>""")
+    man.write_text(m)
+    print("Partage de texte vers Reo Fenua ajouté.")
+else:
+    warn("Partage : manifeste non modifié.")
