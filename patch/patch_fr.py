@@ -227,11 +227,11 @@ tor_not_available_in_this_build	Tor n'est pas disponible dans cette version
 checking	Vérification…
 apk_not_ready_please_prepare_it_first	Application pas prête. Préparez-la d'abord.
 '''
-FR_FRIENDLY = r'''permissions_header	Quelques autorisations
+FR_FRIENDLY = r'''permissions_header	Votre téléphone va poser 2 ou 3 questions. Répondez « Autoriser » ou « Lorsque vous utilisez l'appli ». On ne vous suit pas : c'est pour trouver les téléphones voisins.
 privacy_first	Votre vie privée d'abord
 privacy_protected	Votre vie privée est respectée
 privacy_bullets	• Pas de compte, pas de numéro de téléphone\n• Personne ne suit où vous êtes\n• Les messages passent de téléphone en téléphone, sans internet
-grant_permissions	C'est parti !
+grant_permissions	Tout préparer
 continue_btn	Continuer
 skip	Plus tard
 try_again	Réessayer
@@ -362,7 +362,7 @@ Nearby Wi‑Fi Devices (for Wi‑Fi Aware)	Wi-Fi entre téléphones
 Some permissions were denied:\n	Certaines autorisations ont été refusées :\n
 \nbitchat may not work properly without all permissions.	\nReo Fenua risque de mal fonctionner sans elles.
 Critical permissions were denied. bitchat requires these permissions to function:\n	Il manque des autorisations indispensables pour Reo Fenua :\n
-\nPlease grant these permissions in Settings to use bitchat.	\nOuvrez les réglages du téléphone pour les autoriser, puis revenez dans Reo Fenua.
+\nPlease grant these permissions in Settings to use bitchat.	\nSans elles, vos messages ne partent pas. Touchez « Ouvrir les réglages », puis « Autorisations », autorisez tout, et revenez dans Reo Fenua.
 Some permissions were revoked. Please grant all permissions to continue.	Des autorisations ont été retirées. Autorisez-les à nouveau pour continuer.
 Failed to initialize the app: ${e.message}	Reo Fenua n'a pas pu démarrer : ${e.message}
 Location services are required for Bluetooth scanning on Android. Please enable location services to continue.	Android a besoin de la localisation allumée pour trouver les téléphones proches. Allumez-la pour continuer.
@@ -418,6 +418,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -500,22 +501,9 @@ private class IntroPage(val title: String, val body: String)
 private val introPages = listOf(
     IntroPage(
         "Ia ora na !",
-        "Bienvenue sur Reo Fenua, la messagerie qui marche même sans internet et sans réseau téléphone."
-    ),
-    IntroPage(
-        "Comment ça marche ?",
-        "Votre téléphone parle directement aux téléphones proches, par Bluetooth et Wi-Fi.\n\n" +
-            "Chaque téléphone fait passer le message au suivant, comme une chaîne, jusqu'à la bonne personne."
-    ),
-    IntroPage(
-        "Plus on est nombreux, plus ça porte loin",
-        "Il faut que d'autres personnes autour de vous aient Reo Fenua.\n\n" +
-            "Partagez l'application avec votre famille, vos voisins et votre quartier."
-    ),
-    IntroPage(
-        "En cas de coupure",
-        "Pendant un cyclone ou une panne, Reo Fenua continue de marcher.\n\n" +
-            "Gardez votre téléphone chargé. Dès que le réseau revient, appelez si besoin le 15 (SAMU), le 17 (police), le 18 (pompiers), le 16 (secours en mer) ou le 112."
+        "Reo Fenua permet de s'écrire sans internet et sans réseau téléphone : les messages passent de téléphone en téléphone, par Bluetooth.\n\n" +
+            "Il faut que vos proches et vos voisins l'aient aussi. Plus on est nombreux, plus ça porte loin.\n\n" +
+            "Reo Fenua est une aide en plus. Elle ne remplace pas les secours : 15, 17, 18."
     )
 )
 
@@ -643,7 +631,7 @@ fun ReoFenuaIntroDialog(onDone: () -> Unit) {
                         3 -> OutageSchema(illustrationModifier)
                         else -> LagonIllustration(illustrationModifier)
                     }
-                    TextButton(
+                    if (introPages.size > 1) TextButton(
                         onClick = onDone,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -698,7 +686,7 @@ fun ReoFenuaIntroDialog(onDone: () -> Unit) {
                     horizontalArrangement = Arrangement.Center
                 ) {
                     for (i in introPages.indices) {
-                        Box(
+                        if (introPages.size > 1) Box(
                             modifier = Modifier
                                 .padding(horizontal = 5.dp)
                                 .size(if (i == page) 12.dp else 9.dp)
@@ -1038,6 +1026,7 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
             .zIndex(9f)
             .padding(top = topPadding + 58.dp, start = 12.dp, end = 12.dp)
     )
+    ReoFenuaFirstHello(viewModel)
     // Petits gestes reçus : l'animal traverse aussi l'écran principal
     ReoFenuaGestesLayer(viewModel = viewModel, peerID = null, peerName = "")
     // Pastille « Mode » bien visible, en haut à droite
@@ -1766,6 +1755,79 @@ private fun OutageSchema(modifier: Modifier) {
         drawRoundRect(color = Ocean, topLeft = bl, size = Size(bw, bh), cornerRadius = CornerRadius(h * 0.012f), style = Stroke(width = h * 0.012f))
         drawRect(color = Ocean, topLeft = Offset(bl.x + bw, bl.y + bh * 0.3f), size = Size(h * 0.015f, bh * 0.4f))
         drawRect(color = Vert, topLeft = Offset(bl.x + h * 0.012f, bl.y + h * 0.012f), size = Size(bw - h * 0.024f, bh - h * 0.024f))
+    }
+}
+
+
+// ===================== Premier geste : dire bonjour =====================
+
+/** Proposé une seule fois, à la fin de l'accueil, pour ne pas arriver sur un écran vide. */
+object ReoFenuaHello {
+    private const val PREFS = "reo_fenua_guide"
+    private const val KEY = "first_hello_v1"
+    val show = mutableStateOf(false)
+    private var loaded = false
+
+    fun load(context: android.content.Context) {
+        if (loaded) return
+        loaded = true
+        show.value = !context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).getBoolean(KEY, false)
+    }
+
+    fun done(context: android.content.Context) {
+        show.value = false
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(KEY, true).apply()
+    }
+}
+
+@Composable
+fun BoxScope.ReoFenuaFirstHello(viewModel: ChatViewModel) {
+    val context = LocalContext.current
+    ReoFenuaHello.load(context)
+    if (!ReoFenuaHello.show.value) return
+    if (ReoFenuaGuide.showIntro.value || ReoFenuaName.needsAsk.value || ReoFenuaCharter.needs.value || ReoFenuaMove.show.value) return
+    val privatePeer by viewModel.selectedPrivateChatPeer.collectAsState()
+    val channel by viewModel.currentChannel.collectAsState()
+    val location by viewModel.selectedLocationChannel.collectAsState()
+    // Seulement sur « Autour de moi » (Bluetooth), jamais dans un salon ni par internet
+    val meshOnly = privatePeer == null && channel == null &&
+        (location == null || location is com.bitchat.android.geohash.ChannelID.Mesh)
+    if (!meshOnly) return
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.extraLarge,
+        shadowElevation = 8.dp,
+        modifier = Modifier
+            .align(Alignment.Center)
+            .zIndex(8f)
+            .padding(horizontal = 28.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = "C'est prêt ✓", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(
+                text = "Faites un essai : dites bonjour aux personnes autour de vous qui ont Reo Fenua. " +
+                    "Ce message est public : tous les téléphones proches le voient.",
+                fontSize = 17.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Button(
+                onClick = {
+                    viewModel.sendMessage("Ia ora na ! 👋")
+                    ReoFenuaHello.done(context)
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp)
+            ) { Text(text = "👋 Dire « Ia ora na »", fontSize = 19.sp) }
+            Text(
+                text = "Personne autour ? Personne ne le recevra. Faites installer Reo Fenua à un voisin pour essayer ensemble.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = { ReoFenuaHello.done(context) }) { Text(text = "Plus tard", fontSize = 16.sp) }
+        }
     }
 }
 '''
@@ -3719,7 +3781,8 @@ private fun NameAsker(viewModel: ChatViewModel) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Text(text = "Comment vous appelez-vous ?", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text(
-                        text = "Le nom que vos proches connaissent. Il s'affiche à côté de vos messages et de vos alertes.",
+                        text = "Le prénom que vos proches connaissent, sans nom de famille. " +
+                            "Ce nom et vos messages publics sont visibles par les personnes proches.",
                         fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -3730,19 +3793,23 @@ private fun NameAsker(viewModel: ChatViewModel) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    ReoFenuaCharterShort()
                     Button(
                         onClick = {
                             val n = name.trim()
                             if (n.isNotEmpty()) viewModel.setNickname(n)
                             ReoFenuaName.done(context)
+                            // Le même bouton vaut acceptation des règles de vie affichées juste au-dessus
+                            ReoFenuaCharter.accept(context)
                         },
                         enabled = name.trim().isNotEmpty(),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                    ) { Text(text = "Continuer", fontSize = 18.sp) }
-                    TextButton(
-                        onClick = { ReoFenuaName.done(context) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) { Text(text = "Plus tard (je pourrai toucher mon nom en haut)", fontSize = 15.sp) }
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                    ) { Text(text = "J'accepte et je continue", fontSize = 19.sp) }
+                    Text(
+                        text = "Vous démarrez en mode simple. Le bouton « Mode », en haut à droite, permet de changer.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -4227,7 +4294,12 @@ object ReoFenuaMode {
         if (loaded) return
         loaded = true
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        needsChoice.value = !prefs.contains(KEY)
+        // Premier lancement : mode simple d'office (moins d'écrans). La pastille « Mode » permet de changer.
+        needsChoice.value = false
+        if (!prefs.contains(KEY)) {
+            set(context, true)
+            return
+        }
         simple.value = prefs.getBoolean(KEY, false)
         ReoFenuaShare.sync(context, simple.value)
     }
@@ -6007,6 +6079,29 @@ private val CharterRules = listOf(
     "Pas de contenu sexuel. Respect absolu des mineurs.",
     "Pas de fausses alertes : l'ALERTE sert aux vraies urgences."
 )
+
+/** Les règles de vie en version courte, sous le prénom. Les règles complètes restent dans Plus → Sécurité. */
+@Composable
+fun ReoFenuaCharterShort() {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.large) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = "Nos règles de vie", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            for (rule in listOf(
+                "🤝  On se respecte : ni violence, ni menaces, ni harcèlement.",
+                "🚫  Rien d'illégal : ni drogue, ni contenu sexuel.",
+                "🧒  On protège les enfants.",
+                "🆘  L'ALERTE sert aux vraies urgences."
+            )) {
+                Text(text = rule, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+            Text(
+                text = "Reo Fenua ne lit et ne garde aucun message. Si quelqu'un vous dérange : appui long sur son message, puis « Bloquer ».",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
 @Composable
 fun ReoFenuaCharterScreen() {
