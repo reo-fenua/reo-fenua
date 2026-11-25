@@ -5058,6 +5058,60 @@ fun ReoFenuaPublicNotifySetting() {
         }
     }
 }
+
+
+// ===================== Supprimer un message (sur ce téléphone seulement) =====================
+
+/** Message choisi par un appui long, en attente de confirmation. En mémoire seulement. */
+object ReoFenuaMsgDelete {
+    val target = mutableStateOf<com.bitchat.android.model.BitchatMessage?>(null)
+}
+
+/** Fenêtre de confirmation. Posée par-dessus tout (même la discussion privée ouverte). */
+@Composable
+fun ReoFenuaMsgDeleteHost(viewModel: ChatViewModel) {
+    val msg = ReoFenuaMsgDelete.target.value ?: return
+    val close = { ReoFenuaMsgDelete.target.value = null }
+    Dialog(onDismissRequest = close) {
+        Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge) {
+            Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Supprimer ce message ?",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                val preview = msg.content.trim().let { if (it.length > 120) it.take(120) + "…" else it }
+                if (preview.isNotEmpty()) {
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                        Text(
+                            text = preview,
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Il sera effacé de ce téléphone seulement. L'autre personne garde sa copie.",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Button(
+                    onClick = {
+                        try { viewModel.reoDeleteMessageLocally(msg.id) } catch (_: Exception) { }
+                        close()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                ) { Text(text = "Oui, supprimer", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                    Text(text = "Non", fontSize = 17.sp)
+                }
+            }
+        }
+    }
+}
 '''
 NETWORK_KT = r'''package com.bitchat.android.ui
 
@@ -5664,6 +5718,7 @@ fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
 /** Hôte des écrans de la barre du bas. Toujours présent sur l'écran principal. */
 @Composable
 fun ReoFenuaNavHost(viewModel: ChatViewModel) {
+    ReoFenuaMsgDeleteHost(viewModel)
     if (ReoFenuaNav.showRadar.value) {
         FullScreen(onDismiss = { ReoFenuaNav.showRadar.value = false }) {
             RadarScreen(viewModel = viewModel, onClose = { ReoFenuaNav.showRadar.value = false })
@@ -11795,6 +11850,64 @@ else:
     warn("Bluetooth fiable (client) : emplacement introuvable : " +
          ", ".join(str(i + 1) for i, (a, _) in enumerate(_cli_fix) if t.count(a) != 1))
 
+# ---------- 7c-ter. Bluetooth éteint puis rallumé : le réseau repart tout seul ----------
+# Constaté le 25 nov. 2026 : après avoir coupé puis rallumé le Bluetooth, plus aucune connexion.
+# BitChat garde son état « actif » et ignore toute nouvelle demande de démarrage, alors qu'Android
+# a détruit le serveur et arrêté la recherche. On met le réseau en pause à l'extinction et on le relance au retour.
+_msv = pathlib.Path("app/src/main/java/com/bitchat/android/mesh/BluetoothMeshService.kt")
+t = _msv.read_text() if _msv.exists() else ""
+_onoff = [
+    ("    private var terminated = false\n    \n    init {\n",
+     "    private var terminated = false\n\n"
+     "    // Reo Fenua : après « Bluetooth éteint puis rallumé », relancer le réseau\n"
+     "    @Volatile private var reoPausedByAdapter = false\n"
+     "    private val reoAdapterReceiver = object : android.content.BroadcastReceiver() {\n"
+     "        override fun onReceive(c: Context?, intent: android.content.Intent?) {\n"
+     "            when (intent?.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {\n"
+     "                android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF, android.bluetooth.BluetoothAdapter.STATE_OFF -> {\n"
+     "                    if (isActive && !terminated) {\n"
+     "                        com.bitchat.android.ui.ReoFenuaDiag.w(TAG, \"Reo Fenua: Bluetooth turned off, pausing mesh service\")\n"
+     "                        reoPausedByAdapter = true\n"
+     "                        pauseServicesForTransportDisable()\n"
+     "                    }\n"
+     "                }\n"
+     "                android.bluetooth.BluetoothAdapter.STATE_ON -> {\n"
+     "                    if (reoPausedByAdapter && !terminated) {\n"
+     "                        reoPausedByAdapter = false\n"
+     "                        serviceScope.launch {\n"
+     "                            delay(1500)\n"
+     "                            com.bitchat.android.ui.ReoFenuaDiag.i(TAG, \"Reo Fenua: Bluetooth back on, restarting mesh service\")\n"
+     "                            startServices()\n"
+     "                        }\n"
+     "                    }\n"
+     "                }\n"
+     "            }\n"
+     "        }\n"
+     "    }\n\n"
+     "    init {\n"
+     "        try {\n"
+     "            androidx.core.content.ContextCompat.registerReceiver(\n"
+     "                context.applicationContext, reoAdapterReceiver,\n"
+     "                android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED),\n"
+     "                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED\n"
+     "            )\n"
+     "        } catch (_: Exception) { }\n"),
+]
+if "reoAdapterReceiver" in t:
+    print("Bluetooth éteint/rallumé : déjà présent.")
+elif t and all(t.count(a) == 1 for a, _ in _onoff):
+    for a, b in _onoff:
+        t = t.replace(a, b)
+    # Instance arrêtée pour de bon : on retire l'écoute
+    _m = re.search(r"\n([ \t]*)terminated = true\n", t)
+    if _m and t.count("terminated = true\n") == 1:
+        _i = _m.group(1)
+        t = t[:_m.end()] + _i + "try { context.applicationContext.unregisterReceiver(reoAdapterReceiver) } catch (_: Exception) { }\n" + t[_m.end():]
+    _msv.write_text(t)
+    print("Bluetooth éteint puis rallumé : le réseau repart tout seul.")
+else:
+    warn("Bluetooth éteint/rallumé : emplacement introuvable.")
+
 # ---------- 7d. Diagnostic : messages Bluetooth recopiés dans la console de debug ----------
 _MESH = pathlib.Path("app/src/main/java/com/bitchat/android/mesh")
 _diag_n = 0
@@ -11814,6 +11927,61 @@ for _fn in ("BluetoothGattClientManager.kt", "BluetoothGattServerManager.kt",
         _out.append(_l)
     _f.write_text("\n".join(_out))
 print("Diagnostic Bluetooth : %d messages recopiés dans la console de debug." % _diag_n)
+
+# ---------- 8a. Supprimer un message choisi (sur ce téléphone seulement) ----------
+# Appui long sur un message → « Supprimer ce message » → confirmation (ReoFenuaMsgDeleteHost).
+_cvm = UI / "ChatViewModel.kt"
+t = _cvm.read_text() if _cvm.exists() else ""
+_a = "    private val messageManager = MessageManager(state)\n"
+if "reoDeleteMessageLocally" in t:
+    print("Suppression d'un message : déjà présente (ViewModel).")
+elif t.count(_a) == 1:
+    t = t.replace(_a, _a +
+        "\n    /** Reo Fenua : efface un message de ce téléphone seulement (écran et mémoire). */\n"
+        "    fun reoDeleteMessageLocally(messageID: String) {\n"
+        "        messageManager.removeMessageById(messageID)\n"
+        "        try { com.bitchat.android.services.AppStateStore.removePublicMessage(messageID) } catch (_: Exception) { }\n"
+        "    }\n")
+    _cvm.write_text(t)
+    print("Suppression d'un message : fonction ajoutée.")
+else:
+    warn("Suppression d'un message : ChatViewModel introuvable.")
+
+# Discussion privée (feuille) : l'appui long ne faisait rien
+_mpl = UI / "MeshPeerListSheet.kt"
+t = _mpl.read_text() if _mpl.exists() else ""
+_a = "                        onMessageLongPress = { /* handle long press */ },\n"
+if t.count(_a) == 1:
+    _mpl.write_text(t.replace(_a, "                        onMessageLongPress = { m -> ReoFenuaMsgDelete.target.value = m },\n"))
+    print("Suppression d'un message : appui long dans la discussion privée.")
+else:
+    warn("Suppression d'un message : discussion privée introuvable.")
+
+# Discussion publique : menu de l'appui long (ChatUserSheet), sous « Copier »
+_cus = UI / "ChatUserSheet.kt"
+t = _cus.read_text() if _cus.exists() else ""
+_a = """                                    clipboardManager.setText(AnnotatedString(message.content))
+                                    onDismiss()
+                                }
+                            )
+                        }
+"""
+if t.count(_a) == 1:
+    _cus.write_text(t.replace(_a, _a + """                        item {
+                            UserActionRow(
+                                title = "Supprimer ce message",
+                                subtitle = "Sur ce téléphone seulement",
+                                titleColor = standardRed,
+                                onClick = {
+                                    onDismiss()
+                                    ReoFenuaMsgDelete.target.value = message
+                                }
+                            )
+                        }
+"""))
+    print("Suppression d'un message : ajoutée au menu de l'appui long.")
+else:
+    warn("Suppression d'un message : menu de l'appui long introuvable.")
 
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
