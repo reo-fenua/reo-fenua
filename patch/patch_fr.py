@@ -5444,6 +5444,7 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
         ) {
             SectionTitle("Mon téléphone")
             ReoFenuaPhoneCard()
+            ReoFenuaDiagCard()
 
             SectionTitle(if (ReoFenuaUpdate.available.value != null) "Nouvelle version disponible" else "Mise à jour")
             ReoFenuaUpdateCard()
@@ -5481,6 +5482,7 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
             ReoFenuaGestesSetting()
 
             SectionTitle("Réseau")
+            if (!simple) ReoFenuaWifiSetting()
             PlusButton("Radar : quartier, commune, île") {
                 onClose()
                 ReoFenuaNav.showRadar.value = true
@@ -7180,7 +7182,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7195,6 +7201,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -7291,7 +7298,10 @@ object ReoFenuaPhone {
     )
 
     /** Vrai si l'essentiel manque (Reo Fenua ne peut pas fonctionner). */
-    fun notReady(context: Context): Boolean = items(context).any { it.important && !it.ok }
+    fun notReady(context: Context): Boolean {
+        ReoFenuaBattery.sample(context)
+        return items(context).any { it.important && !it.ok }
+    }
 
     fun openAppSettings(context: Context) {
         try {
@@ -7677,6 +7687,279 @@ fun ReoFenuaShareHost(viewModel: ChatViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+
+// ===================== Wi-Fi direct entre téléphones (optionnel) =====================
+
+/**
+ * Interrupteur pour le lien Wi-Fi direct (Wi-Fi Aware) déjà présent dans BitChat.
+ * Éteint par défaut. Sans routeur ni Internet. Le Bluetooth reste actif en même temps.
+ */
+@Composable
+fun ReoFenuaWifiSetting() {
+    val context = LocalContext.current
+    val manager = remember { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() }
+    val on by manager.wifiAwareEnabled.collectAsState()
+    val supported = remember {
+        try { com.bitchat.android.wifiaware.WifiAwareSupport.isSupported(context) } catch (_: Exception) { false }
+    }
+    val perms = remember {
+        try { com.bitchat.android.onboarding.PermissionManager(context).wifiAwarePermissions() }
+        catch (_: Exception) { emptyList<String>() }
+    }
+    var refused by remember { mutableStateOf(false) }
+    val nearby = "android.permission.NEARBY_WIFI_DEVICES"
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        val ok = !perms.contains(nearby) ||
+            ContextCompat.checkSelfPermission(context, nearby) == PackageManager.PERMISSION_GRANTED
+        if (ok) {
+            refused = false
+            manager.setWifiAwareEnabled(true)
+        } else {
+            refused = true
+        }
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "📶 Wi-Fi direct entre téléphones",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (!supported) {
+                        "Ce téléphone n'a pas cette fonction. Le Bluetooth continue de marcher normalement."
+                    } else if (refused) {
+                        "Autorisation refusée. Touchez l'interrupteur pour réessayer, et répondez « Autoriser »."
+                    } else if (on) {
+                        "Allumé, en plus du Bluetooth. Gardez le Wi-Fi du téléphone allumé. " +
+                            "Cela use plus vite la batterie : éteignez-le si le courant est coupé."
+                    } else {
+                        "En plus du Bluetooth, relie les téléphones compatibles un peu plus loin et plus vite. " +
+                            "Sans box ni Internet. Use plus de batterie."
+                    },
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = on && supported,
+                enabled = supported,
+                onCheckedChange = { want ->
+                    if (!want) {
+                        manager.setWifiAwareEnabled(false)
+                    } else {
+                        val missing = perms.filter {
+                            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                        }
+                        if (missing.isEmpty()) {
+                            refused = false
+                            manager.setWifiAwareEnabled(true)
+                        } else {
+                            launcher.launch(missing.toTypedArray())
+                        }
+                    }
+                }
+            )
+        }
+    }
+}
+
+
+// ===================== Diagnostic : compatibilité et batterie =====================
+
+/**
+ * Mesure la vitesse à laquelle la batterie descend, avec et sans Wi-Fi direct.
+ * C'est une mesure de tout le téléphone, gardée dans le téléphone (quelques nombres), jamais envoyée.
+ */
+object ReoFenuaBattery {
+    private const val PREFS = "reo_fenua_guide"
+    private const val MIN_MS = 30L * 60L * 1000L
+    private const val MAX_MS = 12L * 60L * 60L * 1000L
+    val refresh = mutableStateOf(0)
+
+    /** Niveau de 0 à 100, ou -1 si inconnu. */
+    fun level(context: Context): Int = read(context).first
+
+    fun charging(context: Context): Boolean = read(context).second
+
+    private fun read(context: Context): Pair<Int, Boolean> {
+        return try {
+            val i = context.applicationContext.registerReceiver(
+                null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            ) ?: return Pair(-1, false)
+            val l = i.getIntExtra("level", -1)
+            val sc = i.getIntExtra("scale", 100)
+            val plugged = i.getIntExtra("plugged", 0) != 0
+            val st = i.getIntExtra("status", -1)
+            val pct = if (l < 0 || sc <= 0) -1 else (l * 100) / sc
+            Pair(pct, plugged || st == 2 || st == 5)
+        } catch (_: Exception) {
+            Pair(-1, false)
+        }
+    }
+
+    fun wifiOn(): Boolean = try {
+        com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().wifiAwareEnabled.value
+    } catch (_: Exception) {
+        false
+    }
+
+    /** Pourcentage perdu par heure, ou 0 si pas encore mesuré. */
+    fun rate(context: Context, wifi: Boolean): Float = try {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getFloat(if (wifi) "bat_rate_wifi" else "bat_rate_bt", 0f)
+    } catch (_: Exception) {
+        0f
+    }
+
+    fun sample(context: Context) {
+        try {
+            val now0 = read(context)
+            val lvl = now0.first
+            val chg = now0.second
+            if (lvl < 0) return
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val wifi = wifiOn()
+            val now = System.currentTimeMillis()
+            val t0 = prefs.getLong("bat_t0", 0L)
+            val l0 = prefs.getInt("bat_l0", -1)
+            val w0 = prefs.getBoolean("bat_w0", false)
+            val restart = chg || t0 == 0L || l0 < 0 || w0 != wifi || lvl > l0 || now < t0 || now - t0 > MAX_MS
+            if (restart) {
+                prefs.edit().putLong("bat_t0", now).putInt("bat_l0", lvl).putBoolean("bat_w0", wifi).apply()
+                return
+            }
+            val drop = l0 - lvl
+            val dt = now - t0
+            if (dt >= MIN_MS && drop >= 2) {
+                val perHour = drop.toFloat() * 3600000f / dt.toFloat()
+                prefs.edit().putFloat(if (wifi) "bat_rate_wifi" else "bat_rate_bt", perHour).apply()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun rateText(r: Float): String = when {
+        r <= 0f -> "pas encore mesuré"
+        r < 1f -> "moins de 1 % par heure"
+        else -> "environ " + String.format(java.util.Locale.FRENCH, "%.0f", r) + " % par heure"
+    }
+}
+
+@Composable
+fun ReoFenuaDiagCard() {
+    val context = LocalContext.current
+    val tick = ReoFenuaPhone.refresh.value + ReoFenuaBattery.refresh.value
+    val simple = ReoFenuaMode.simple.value
+    val wifiOk = remember {
+        try { com.bitchat.android.wifiaware.WifiAwareSupport.isSupported(context) } catch (_: Exception) { false }
+    }
+    val wifiOn = ReoFenuaBattery.wifiOn()
+    val level = remember(tick) { ReoFenuaBattery.sample(context); ReoFenuaBattery.level(context) }
+    val charging = remember(tick) { ReoFenuaBattery.charging(context) }
+    val rBt = remember(tick) { ReoFenuaBattery.rate(context, false) }
+    val rWifi = remember(tick) { ReoFenuaBattery.rate(context, true) }
+    val rNow = if (wifiOn) rWifi else rBt
+    val wifiPeers by com.bitchat.android.wifiaware.WifiAwareController.connectedPeers.collectAsState()
+    val blePeers = remember(tick) {
+        try { com.bitchat.android.service.MeshServiceHolder.meshService?.getActivePeerCount() ?: 0 } catch (_: Exception) { 0 }
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                text = "🔎 Diagnostic de ce téléphone",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(6.dp))
+            if (!simple) {
+                Text(
+                    text = if (wifiOk) "✓ Wi-Fi direct : ce téléphone est compatible."
+                    else "✕ Wi-Fi direct : ce téléphone n'est pas compatible. Le Bluetooth suffit.",
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            Text(
+                text = "👥 Autour de moi, en ce moment : " +
+                    (if (blePeers <= 0) "aucun téléphone" else if (blePeers == 1) "1 téléphone" else blePeers.toString() + " téléphones") +
+                    " en Bluetooth" +
+                    (if (!simple && wifiOk && wifiOn) ", " + wifiPeers.size + " en Wi-Fi direct" else "") + ".",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(8.dp))
+            if (level >= 0) {
+                Text(
+                    text = "🔋 Batterie : " + level + " %" + (if (charging) " · en charge" else ""),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                val barColor = if (level >= 50) Color(0xFF2E8B57) else if (level >= 20) Color(0xFFE8B33A) else Color(0xFFC8102E)
+                Box(
+                    modifier = Modifier
+                        .padding(top = 6.dp, bottom = 6.dp)
+                        .fillMaxWidth()
+                        .height(14.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(7.dp))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(level.coerceIn(2, 100) / 100f)
+                            .height(14.dp)
+                            .background(barColor, RoundedCornerShape(7.dp))
+                    )
+                }
+                if (!charging && rNow >= 1f) {
+                    val hours = (level / rNow).toInt()
+                    Text(
+                        text = "À ce rythme : environ " + (if (hours < 1) "moins d'1" else hours.toString()) + " h avant la batterie vide.",
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Bluetooth seul : " + ReoFenuaBattery.rateText(rBt),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!simple && wifiOk) {
+                Text(
+                    text = "Avec Wi-Fi direct : " + ReoFenuaBattery.rateText(rWifi),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = "Mesure réelle de tout le téléphone, écran et autres applis compris. " +
+                    "Il faut au moins 30 minutes sans recharge. Elle reste dans ce téléphone.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
