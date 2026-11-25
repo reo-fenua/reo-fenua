@@ -512,7 +512,7 @@ private class HelpItem(val question: String, val answer: String)
 private val helpItems = listOf(
     HelpItem(
         "Pourquoi je vois 0 personne ?",
-        "Personne autour de vous n'a Reo Fenua ouvert, ou le Bluetooth est éteint. Rapprochez-vous : la portée est d'environ 10 à 30 mètres entre deux téléphones, un peu plus en plein air. La carte « Étendre le réseau » (dans Alerte et dans Plus) aide aussi à trouver un Wi-Fi gratuit."
+        "Personne autour de vous n'a Reo Fenua ouvert, ou le Bluetooth est éteint. Rapprochez-vous : la portée est d'environ 10 à 30 mètres entre deux téléphones, un peu plus en plein air. La carte « Étendre le réseau » (dans Alerte, et dans Plus › Autour de moi) aide aussi à trouver un Wi-Fi gratuit."
     ),
     HelpItem(
         "Faut-il internet ?",
@@ -532,7 +532,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Comment partager l'application ?",
-        "Touchez « Plus » en bas, puis « Partager Reo Fenua ». Vous pouvez aussi envoyer le fichier d'installation par WhatsApp ou Bluetooth."
+        "Touchez « Plus » en bas, puis « Aide et partage », puis « Partager Reo Fenua ». Vous pouvez aussi envoyer le fichier d'installation par WhatsApp ou Bluetooth."
     ),
     HelpItem(
         "Est-ce que ça use la batterie ?",
@@ -544,7 +544,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Comment tout effacer en urgence ?",
-        "Touchez « Plus » en bas, puis « Tout effacer » tout en bas, et confirmez. En urgence : touchez 3 fois rapidement le logo en haut à gauche, puis « Effacer ». Tous vos messages et votre identité sont alors effacés de ce téléphone. Impossible d'annuler."
+        "Touchez « Plus » en bas, puis « Sécurité », puis « Tout effacer » tout en bas, et confirmez. En urgence : touchez 3 fois rapidement le logo en haut à gauche, puis « Effacer ». Tous vos messages et votre identité sont alors effacés de ce téléphone. Impossible d'annuler."
     )
 )
 
@@ -826,9 +826,9 @@ private val guideSteps = listOf(
     Step("Écrire une lettre",
         "En bas, touchez « Lettres ».\n\nUne lettre peut aller à quelqu'un qui n'est pas là : elle attend jusqu'à 24 h et part dès que la personne est joignable."),
     Step("Partager l'application",
-        "En bas, touchez « Plus », puis « Partager Reo Fenua ».\n\nPlus il y a de téléphones, plus les messages vont loin."),
+        "En bas, touchez « Plus », puis « Aide et partage », puis « Partager Reo Fenua ».\n\nPlus il y a de téléphones, plus les messages vont loin."),
     Step("Besoin d'aide ?",
-        "En bas, touchez « Plus » pour la taille du texte, le son, le fond d'écran, la carte du réseau, le mode relais et le partage.\n\nCe mode d'emploi est toujours dans « Plus », rubrique « Aide ».")
+        "En bas, touchez « Plus ». En haut : la taille des lettres et le mode. Ensuite, cinq grandes tuiles : Mon téléphone, Écran et lettres, Autour de moi, Sécurité, Aide et partage.\n\nCe mode d'emploi est toujours dans « Plus », tuile « Aide et partage ».")
 )
 
 object ReoFenuaSteps {
@@ -2139,16 +2139,29 @@ object ReoFenuaUpdate {
     }
 }
 
+/** État de la carte « Mises à jour », gardé pendant toute la vie de l'app (rien sur le disque). */
+object ReoFenuaUpdateUi {
+    val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+    val status = mutableStateOf("Version installée : " + ReoFenuaUpdate.CURRENT_TAG)
+    val release = mutableStateOf<ReoFenuaUpdate.Release?>(null)
+    val busy = mutableStateOf(false)
+    val downloading = mutableStateOf(false)
+    val progress = mutableFloatStateOf(0f)
+    val ready = mutableStateOf(false)
+}
+
 @Composable
 fun ReoFenuaUpdateCard() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf("Version installée : " + ReoFenuaUpdate.CURRENT_TAG) }
-    var release by remember { mutableStateOf<ReoFenuaUpdate.Release?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var downloading by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var ready by remember { mutableStateOf(false) }
+    // Reo Fenua : l'état vit hors de l'écran, pour qu'un téléchargement continue et que
+    // « Installer » reste proposé si l'on quitte la page puis qu'on revient.
+    val scope = ReoFenuaUpdateUi.scope
+    var status by ReoFenuaUpdateUi.status
+    var release by ReoFenuaUpdateUi.release
+    var busy by ReoFenuaUpdateUi.busy
+    var downloading by ReoFenuaUpdateUi.downloading
+    var progress by ReoFenuaUpdateUi.progress
+    var ready by ReoFenuaUpdateUi.ready
     ReoFenuaUpdate.loadAuto(context)
 
     fun startInstall() {
@@ -2215,13 +2228,13 @@ fun ReoFenuaUpdateCard() {
                             scope.launch {
                                 val ok = try {
                                     withContext(Dispatchers.IO) {
-                                        ReoFenuaUpdate.download(context, rel) { p -> progress = p }
+                                        ReoFenuaUpdate.download(context.applicationContext, rel) { p -> progress = p }
                                     }
                                 } catch (e: Exception) {
                                     false
                                 }
                                 downloading = false
-                                val refused = if (ok) withContext(Dispatchers.IO) { ReoFenuaUpdate.verify(context) } else null
+                                val refused = if (ok) withContext(Dispatchers.IO) { ReoFenuaUpdate.verify(context.applicationContext) } else null
                                 if (ok && refused != null) {
                                     try {
                                         ReoFenuaUpdate.updateFile(context).delete()
@@ -4696,6 +4709,8 @@ private fun ReoStyleChoice(
 
 object ReoFenuaAround {
     val show = mutableStateOf(false)
+    /** Carte centrale « Inviter un proche » fermée par la personne (jusqu'au prochain lancement, rien sur le disque). */
+    val cardClosed = mutableStateOf(false)
 }
 
 /** Ouvre le partage du téléphone avec le lien de téléchargement de Reo Fenua. */
@@ -4765,7 +4780,9 @@ fun BoxScope.ReoFenuaAroundLayer(viewModel: ChatViewModel, topPadding: Dp, hideP
         }
     }
 
-    if (messages.none { it.sender != "system" }) {
+    if (messages.none { it.sender != "system" } && !ReoFenuaAround.cardClosed.value) {
+        // Retour Android : ferme la carte au lieu de rester bloqué dessus
+        androidx.activity.compose.BackHandler(enabled = !ReoFenuaHome.show.value) { ReoFenuaAround.cardClosed.value = true }
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
@@ -4800,6 +4817,10 @@ fun BoxScope.ReoFenuaAroundLayer(viewModel: ChatViewModel, topPadding: Dp, hideP
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = ELagon, contentColor = Color.White)
                 ) { Text(text = "Inviter un proche", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton(
+                    onClick = { ReoFenuaAround.cardClosed.value = true },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                ) { Text(text = "Fermer", fontSize = 17.sp) }
             }
         }
     }
@@ -5433,6 +5454,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -5456,6 +5480,13 @@ object ReoFenuaNav {
     val showRadar = mutableStateOf(false)
     val showProches = mutableStateOf(false)
     val showPlus = mutableStateOf(false)
+    /** Page ouverte dans « Plus » : null = les tuiles. Jamais enregistré sur le disque. */
+    val plusPage = mutableStateOf<String?>(null)
+
+    fun closePlus() {
+        plusPage.value = null
+        showPlus.value = false
+    }
 }
 
 // ===================== En-tête commun : « ← Retour » à gauche =====================
@@ -5546,8 +5577,21 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
                             drawCircle(color = tint, radius = s * 0.24f, center = Offset(s * 0.34f, s * 0.86f), style = Stroke(width = line))
                             drawCircle(color = tint, radius = s * 0.24f, center = Offset(s * 0.68f, s * 0.86f), style = Stroke(width = line))
                         }
-                        NavIcon.Aide, NavIcon.Lettres -> {
+                        NavIcon.Aide -> {
                             drawCircle(color = tint, radius = s * 0.45f, center = c, style = Stroke(width = line))
+                        }
+                        NavIcon.Lettres -> {
+                            // Enveloppe dessinée, même trait que les autres icônes
+                            val l = s * 0.06f; val r = s * 0.94f; val top = s * 0.2f; val bot = s * 0.8f
+                            drawRoundRect(
+                                color = tint,
+                                topLeft = Offset(l, top),
+                                size = androidx.compose.ui.geometry.Size(r - l, bot - top),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(s * 0.08f, s * 0.08f),
+                                style = Stroke(width = line)
+                            )
+                            drawLine(color = tint, start = Offset(l + line, top + line), end = Offset(s / 2f, s * 0.53f), strokeWidth = line, cap = StrokeCap.Round)
+                            drawLine(color = tint, start = Offset(r - line, top + line), end = Offset(s / 2f, s * 0.53f), strokeWidth = line, cap = StrokeCap.Round)
                         }
                         else -> {
                             drawCircle(color = tint, radius = s * 0.09f, center = Offset(s * 0.2f, s / 2f))
@@ -5558,9 +5602,6 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
                 }
                 if (icon == NavIcon.Aide) {
                     Text(text = "?", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = tint)
-                }
-                if (icon == NavIcon.Lettres) {
-                    Text(text = "✉", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = tint)
                 }
             }
             if (badge > 0) {
@@ -5634,8 +5675,10 @@ fun ReoFenuaNavHost(viewModel: ChatViewModel) {
         }
     }
     if (ReoFenuaNav.showPlus.value) {
-        FullScreen(onDismiss = { ReoFenuaNav.showPlus.value = false }) {
-            PlusScreen(viewModel = viewModel, onClose = { ReoFenuaNav.showPlus.value = false })
+        FullScreen(onDismiss = {
+            if (ReoFenuaNav.plusPage.value != null) ReoFenuaNav.plusPage.value = null else ReoFenuaNav.closePlus()
+        }) {
+            PlusScreen(viewModel = viewModel, onClose = { ReoFenuaNav.closePlus() })
         }
     }
 }
@@ -5747,6 +5790,7 @@ private fun RadarScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
     fun join(channel: GeohashChannel) {
         if (manager.selectNearby(channel)) {
             onClose()
+            ReoFenuaNav.closePlus()
         } else {
             info = "Impossible pour le moment : la localisation n'est pas prête. Réessayez dans quelques secondes."
         }
@@ -5812,6 +5856,7 @@ private fun RadarScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                     onClick = {
                         manager.select(ChannelID.Mesh)
                         onClose()
+                        ReoFenuaNav.closePlus()
                     }
                 )
 
@@ -5895,6 +5940,7 @@ private fun RadarScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                     onClick = {
                         manager.selectManual(GeohashChannel(levelForCode(code.length), code), true)
                         onClose()
+                        ReoFenuaNav.closePlus()
                     },
                     enabled = code.length >= 2,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
@@ -6025,7 +6071,16 @@ private fun ProchesScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
     }
 }
 
-// ===================== Plus : réglages rangés =====================
+// ===================== Plus : 5 tuiles, une page chacune =====================
+// Choix du conseil (25 nov. 2026) : pas de menu déroulant ni de sections qui s'ouvrent.
+// En haut, toujours visibles : taille des lettres, mode, et les alertes (mise à jour, téléphone pas prêt).
+// Les tuiles sont les mêmes dans tous les modes ; le mode Simple cache seulement des lignes dedans.
+
+private const val PAGE_PHONE = "phone"
+private const val PAGE_SCREEN = "screen"
+private const val PAGE_AROUND = "around"
+private const val PAGE_SAFETY = "safety"
+private const val PAGE_HELP = "help"
 
 @Composable
 private fun SectionTitle(text: String) {
@@ -6034,7 +6089,9 @@ private fun SectionTitle(text: String) {
         fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp)
+        modifier = Modifier
+            .padding(start = 20.dp, top = 16.dp, bottom = 4.dp)
+            .semantics { heading() }
     )
 }
 
@@ -6049,139 +6106,244 @@ private fun PlusButton(text: String, onClick: () -> Unit) {
     ) { Text(text = text, fontSize = 17.sp) }
 }
 
+/** Grosse tuile : dessin, titre, une ligne d'explication. Toute la tuile se touche. */
+@Composable
+private fun PlusTile(emoji: String, title: String, subtitle: String, alert: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        color = if (alert) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .heightIn(min = 72.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(text = emoji, fontSize = 30.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (alert) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+                )
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        text = subtitle,
+                        fontSize = 15.sp,
+                        color = if (alert) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(text = "›", fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Taille des lettres : toujours en haut. Le choix en cours est annoncé par TalkBack. */
+@Composable
+private fun PlusTextSize() {
+    val context = LocalContext.current
+    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+        Text(
+            text = "Taille des lettres",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() }
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val current = ReoFenuaTextSize.scale.value
+            for (i in ReoFenuaTextSize.names.indices) {
+                val v = ReoFenuaTextSize.values[i]
+                val on = kotlin.math.abs(current - v) < 0.01f
+                val mod = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
+                    .semantics { selected = on }
+                if (on) {
+                    Button(onClick = { ReoFenuaTextSize.save(context, v) }, modifier = mod) {
+                        Text(text = ReoFenuaTextSize.names[i], fontSize = 15.sp)
+                    }
+                } else {
+                    OutlinedButton(onClick = { ReoFenuaTextSize.save(context, v) }, modifier = mod) {
+                        Text(text = ReoFenuaTextSize.names[i], fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
     val context = LocalContext.current
-    val simple = ReoFenuaMode.simple.value
-    var confirmErase by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { ReoFenuaTextSize.load(context) }
+    when (ReoFenuaNav.plusPage.value) {
+        PAGE_PHONE -> PlusPhonePage(viewModel)
+        PAGE_SCREEN -> PlusScreenPage(viewModel)
+        PAGE_AROUND -> PlusAroundPage(viewModel, onClose)
+        PAGE_SAFETY -> PlusSafetyPage(viewModel, onClose)
+        PAGE_HELP -> PlusHelpPage()
+        else -> PlusHome(onClose)
+    }
+}
+
+@Composable
+private fun PlusHome(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val phoneNotReady = remember(ReoFenuaPhone.refresh.value) { ReoFenuaPhone.notReady(context) }
+    val newVersion = ReoFenuaUpdate.available.value
+    fun open(page: String) { ReoFenuaNav.plusPage.value = page }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ReoFenuaScreenHeader(title = "Plus", subtitle = "Réglages, réseau et partage", color = VOcean, onBack = onClose)
+        ReoFenuaScreenHeader(title = "Plus", subtitle = "Réglages, aide et partage", color = VOcean, onBack = onClose)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
         ) {
-            SectionTitle("Mon avatar")
-            ReoFenuaMyAvatarCard(viewModel)
+            // Alertes : visibles seulement quand il y a quelque chose à faire
+            if (newVersion != null) {
+                PlusTile("⬆️", "Nouvelle version disponible", "Touchez pour la télécharger", alert = true) { open(PAGE_PHONE) }
+            }
+            if (phoneNotReady) {
+                PlusTile("⚠️", "Votre téléphone n'est pas tout à fait prêt", "Touchez pour voir quoi régler", alert = true) { open(PAGE_PHONE) }
+            }
 
-            SectionTitle("Mon téléphone")
-            ReoFenuaPhoneCard()
-            ReoFenuaDiagCard()
-
-            SectionTitle(if (ReoFenuaUpdate.available.value != null) "Nouvelle version disponible" else "Mise à jour")
-            ReoFenuaUpdateCard()
-            ReoFenuaAutoUpdateSetting()
+            // Toujours en haut : les « sorties de secours »
+            PlusTextSize()
+            ReoFenuaModeCard()
 
             SectionTitle("Réglages")
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val current = ReoFenuaTextSize.scale.value
-                for (i in ReoFenuaTextSize.names.indices) {
-                    val v = ReoFenuaTextSize.values[i]
-                    val on = kotlin.math.abs(current - v) < 0.01f
-                    if (on) {
-                        Button(
-                            onClick = { ReoFenuaTextSize.save(context, v) },
-                            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
-                        ) { Text(text = ReoFenuaTextSize.names[i], fontSize = 15.sp) }
-                    } else {
-                        OutlinedButton(
-                            onClick = { ReoFenuaTextSize.save(context, v) },
-                            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
-                        ) { Text(text = ReoFenuaTextSize.names[i], fontSize = 15.sp) }
-                    }
-                }
+            PlusTile("📱", "Mon téléphone", "Préparation, batterie, mise à jour") { open(PAGE_PHONE) }
+            PlusTile("🔤", "Écran et lettres", "Mon avatar, son, notifications, style") { open(PAGE_SCREEN) }
+            PlusTile("🐚", "Autour de moi", "Radar, portée, Wi-Fi, relais") { open(PAGE_AROUND) }
+            PlusTile("🔒", "Sécurité", "Code, captures, règles, tout effacer") { open(PAGE_SAFETY) }
+            PlusTile("❓", "Aide et partage", "Mode d'emploi, partager Reo Fenua") { open(PAGE_HELP) }
+
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+/** Page d'une tuile : « ← Retour » revient aux tuiles (le bouton Retour d'Android aussi). */
+@Composable
+private fun PlusPage(title: String, subtitle: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        ReoFenuaScreenHeader(title = title, subtitle = subtitle, color = VOcean, onBack = { ReoFenuaNav.plusPage.value = null })
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            content()
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun PlusPhonePage(viewModel: ChatViewModel) {
+    val simple = ReoFenuaMode.simple.value
+    PlusPage("📱 Mon téléphone", "Préparation, batterie, mise à jour") {
+        SectionTitle("Préparer mon téléphone")
+        ReoFenuaPhoneCard()
+        ReoFenuaDiagCard()
+
+        SectionTitle(if (ReoFenuaUpdate.available.value != null) "Nouvelle version disponible" else "Mise à jour")
+        ReoFenuaUpdateCard()
+        ReoFenuaAutoUpdateSetting()
+
+        SectionTitle("Batterie")
+        ReoFenuaBatteryCard()
+
+        if (!simple) {
+            SectionTitle("Réglages techniques")
+            PlusButton("Réglages de BitChat (Tor, mises à jour…)") {
+                ReoFenuaNav.closePlus()
+                viewModel.showAppInfo()
             }
-            ReoFenuaSoundCard()
-            ReoFenuaPublicNotifySetting()
-            ReoFenuaModeCard()
-            if (!simple) ReoFenuaWallpaperCard()
+        }
+    }
+}
 
-            SectionTitle("Apparence")
-            ReoFenuaStyleSetting()
-            ReoFenuaGestesSetting()
+@Composable
+private fun PlusScreenPage(viewModel: ChatViewModel) {
+    val simple = ReoFenuaMode.simple.value
+    PlusPage("🔤 Écran et lettres", "Mon avatar, son, notifications, style") {
+        SectionTitle("Mon avatar")
+        ReoFenuaMyAvatarCard(viewModel)
 
+        SectionTitle("Son et notifications")
+        ReoFenuaSoundCard()
+        ReoFenuaPublicNotifySetting()
+
+        SectionTitle("Style")
+        ReoFenuaStyleSetting()
+        ReoFenuaGestesSetting()
+        if (!simple) ReoFenuaWallpaperCard()
+    }
+}
+
+@Composable
+private fun PlusAroundPage(viewModel: ChatViewModel, onClose: () -> Unit) {
+    val simple = ReoFenuaMode.simple.value
+    PlusPage("🐚 Autour de moi", "Radar, portée, Wi-Fi, relais") {
+        SectionTitle("Radar")
+        // Le Radar s'ouvre par-dessus : « Retour » ramène ici ; choisir un canal ferme tout.
+        PlusButton("Radar : quartier, commune, île") { ReoFenuaNav.showRadar.value = true }
+
+        SectionTitle("Portée")
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+            ReoFenuaExtendCard(peopleAround = viewModel.connectedPeers.value.count { it != viewModel.myPeerID })
+        }
+
+        if (!simple) {
             SectionTitle("Réseau")
-            if (!simple) ReoFenuaWifiSetting()
-            PlusButton("Radar : quartier, commune, île") {
-                onClose()
-                ReoFenuaNav.showRadar.value = true
-            }
-            if (!simple) {
-                PlusButton("Carte du réseau") {
-                    onClose()
-                    ReoFenuaNetwork.showMap.value = true
-                }
-                PlusButton("Mode relais (vieux téléphone fixe)") {
-                    onClose()
-                    ReoFenuaNetwork.showRelay.value = true
-                }
-            }
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
-                ReoFenuaExtendCard(peopleAround = viewModel.connectedPeers.value.count { it != viewModel.myPeerID })
-            }
+            ReoFenuaWifiSetting()
+            PlusButton("Carte du réseau") { ReoFenuaNetwork.showMap.value = true }
+            PlusButton("Mode relais (vieux téléphone fixe)") { ReoFenuaNetwork.showRelay.value = true }
+        }
+    }
+}
 
-            SectionTitle("Batterie")
-            ReoFenuaBatteryCard()
+@Composable
+private fun PlusSafetyPage(viewModel: ChatViewModel, onClose: () -> Unit) {
+    val context = LocalContext.current
+    var confirmErase by remember { mutableStateOf(false) }
+    PlusPage("🔒 Sécurité", "Code, captures, règles, tout effacer") {
+        SectionTitle("Protéger mes messages")
+        ReoFenuaLockSetting()
+        ReoFenuaScreenshotSetting()
+        PlusButton("Vérifier un proche (QR code)") {
+            onClose()
+            viewModel.showVerificationSheet()
+        }
+        PlusButton("Relire nos règles de vie") {
+            ReoFenuaCharter.needs.value = true
+        }
 
-            SectionTitle("Sécurité")
-            ReoFenuaLockSetting()
-            ReoFenuaScreenshotSetting()
-            PlusButton("Vérifier un proche (QR code)") {
-                onClose()
-                viewModel.showVerificationSheet()
-            }
-            PlusButton("Relire nos règles de vie") {
-                ReoFenuaCharter.needs.value = true
-            }
+        // Tout en bas, à part : les gestes qu'on ne peut pas annuler
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+        SectionTitle("Remettre en ordre")
+        ReoFenuaResetSetting()
 
-            SectionTitle("Partager")
-            PlusButton("Partager Reo Fenua") {
-                try {
-                    val send = Intent(Intent.ACTION_SEND)
-                    send.type = "text/plain"
-                    send.putExtra(
-                        Intent.EXTRA_TEXT,
-                        "Reo Fenua, la messagerie qui marche même sans réseau. Installez-la ici : https://github.com/" +
-                            ReoFenuaUpdate.REPO + "/releases/latest"
-                    )
-                    val chooser = Intent.createChooser(send, "Partager Reo Fenua")
-                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(chooser)
-                } catch (e: Exception) {
-                    // aucune application de partage
-                }
-            }
-
-            SectionTitle("Aide")
-            PlusButton("Mode d'emploi pas à pas") {
-                onClose()
-                ReoFenuaSteps.show.value = true
-            }
-            PlusButton("Revoir l'introduction") {
-                onClose()
-                ReoFenuaGuide.showIntro.value = true
-            }
-
-            if (!simple) {
-                SectionTitle("Réglages avancés")
-                PlusButton("Réglages techniques (BitChat, Tor, mises à jour)") {
-                    onClose()
-                    viewModel.showAppInfo()
-                }
-            }
-
-            SectionTitle("Remettre en ordre")
-            ReoFenuaResetSetting()
-
-            SectionTitle("Nouvelle identité / Tout effacer")
+        SectionTitle("Nouvelle identité / Tout effacer")
             if (confirmErase) {
                 Surface(
                     color = Color(0xFFFDE3E7),
@@ -6221,7 +6383,34 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                         .heightIn(min = 52.dp)
                 ) { Text(text = "Nouvelle identité (tout effacer)", fontSize = 16.sp, color = VRouge) }
             }
-            Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun PlusHelpPage() {
+    val context = LocalContext.current
+    PlusPage("❓ Aide et partage", "Mode d'emploi, partager Reo Fenua") {
+        SectionTitle("Aide")
+        // Ces fenêtres s'ouvrent par-dessus : en les fermant, on revient ici.
+        PlusButton("Mode d'emploi pas à pas") { ReoFenuaSteps.show.value = true }
+        PlusButton("Revoir l'introduction") { ReoFenuaGuide.showIntro.value = true }
+
+        SectionTitle("Partager")
+        PlusButton("Partager Reo Fenua") {
+            try {
+                val send = Intent(Intent.ACTION_SEND)
+                send.type = "text/plain"
+                send.putExtra(
+                    Intent.EXTRA_TEXT,
+                    "Reo Fenua, la messagerie qui marche même sans réseau. Installez-la ici : https://github.com/" +
+                        ReoFenuaUpdate.REPO + "/releases/latest"
+                )
+                val chooser = Intent.createChooser(send, "Partager Reo Fenua")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                // aucune application de partage
+            }
         }
     }
 }
@@ -10429,12 +10618,30 @@ private fun HomeList(viewModel: ChatViewModel) {
             )
         }
         if (rows.isEmpty()) {
-            Text(
-                text = "Vos proches apparaîtront ici. Touchez « Rechercher une personne » pour voir qui est autour de vous et l'enregistrer.",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
-            )
+            // Consigne fermable : une fois lue et fermée, elle ne revient plus (préférence locale, rien d'autre)
+            val hintCtx = LocalContext.current
+            val hintPrefs = remember { hintCtx.getSharedPreferences("reo_fenua_guide", android.content.Context.MODE_PRIVATE) }
+            var hintClosed by remember { mutableStateOf(hintPrefs.getBoolean("home_hint_closed", false)) }
+            if (!hintClosed) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "Vos proches apparaîtront ici. Touchez « Rechercher une personne » pour voir qui est autour de vous et l'enregistrer.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f).padding(top = 4.dp)
+                    )
+                    TextButton(
+                        onClick = {
+                            hintClosed = true
+                            hintPrefs.edit().putBoolean("home_hint_closed", true).apply()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text(text = "✕ Fermer", fontSize = 16.sp) }
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
     }
