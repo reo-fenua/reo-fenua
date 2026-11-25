@@ -520,7 +520,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Qui peut lire mes messages ?",
-        "Les messages écrits dans « Autour de moi » sont lus par tous ceux qui sont autour. Pour un message privé et chiffré, touchez « Discussions » en bas, puis le nom de la personne. Le texte gris de la case d'écriture dit toujours qui pourra lire."
+        "Les messages écrits dans « Autour de moi » sont lus par tous ceux qui sont autour. Pour un message privé et chiffré, touchez « Messages » en bas, puis le nom de la personne. Le texte gris de la case d'écriture dit toujours qui pourra lire."
     ),
     HelpItem(
         "Comment changer mon nom ?",
@@ -540,7 +540,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Comment bloquer quelqu'un ?",
-        "Touchez « Discussions » en bas, puis « ⋯ » au bout de la ligne de la personne, puis « Bloquer » et confirmez. La personne doit être à portée. Vous ne recevrez plus ses messages ni ses lettres. Pour débloquer : même « ⋯ », puis « Débloquer »."
+        "Touchez « Messages » en bas, puis « ⋯ » au bout de la ligne de la personne, puis « Bloquer » et confirmez. La personne doit être à portée. Vous ne recevrez plus ses messages ni ses lettres. Pour débloquer : même « ⋯ », puis « Débloquer »."
     ),
     HelpItem(
         "Comment tout effacer en urgence ?",
@@ -812,7 +812,7 @@ private val guideSteps = listOf(
     Step("Écrire à tout le monde",
         "En bas, touchez « écrire un message… », tapez votre texte, puis touchez la flèche pour envoyer.\n\nTout le monde autour de vous le reçoit."),
     Step("Écrire à une seule personne",
-        "En bas, touchez « Discussions », puis le nom de la personne. Pour trouver quelqu'un, touchez « Rechercher une personne ». Si elle n'est pas autour, envoyez plutôt une lettre (bouton « Lettres ») : elle attend jusqu'à 24 h.\n\nVotre message privé est chiffré : seule cette personne peut le lire."),
+        "En bas, touchez « Messages », puis le nom de la personne. Pour trouver quelqu'un, touchez « Rechercher une personne ». Si elle n'est pas autour, envoyez plutôt une lettre (bouton « Lettres ») : elle attend jusqu'à 24 h.\n\nVotre message privé est chiffré : seule cette personne peut le lire."),
     Step("Envoyer une photo",
         "Touchez le bouton de l'appareil photo pour choisir une photo dans votre galerie.\n\nPour prendre une photo tout de suite, gardez le doigt appuyé sur ce bouton."),
     Step("Envoyer un document ou une vidéo",
@@ -1027,6 +1027,8 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
             .padding(top = topPadding + 58.dp, start = 12.dp, end = 12.dp)
     )
     ReoFenuaFirstHello(viewModel)
+    ReoFenuaNoCaptureHost()
+    ReoFenuaAlertNotifyHost()
     // Accueil « Discussions » par-dessus tout l'écran principal
     ReoFenuaHomeLayer(viewModel)
     // Nombre de téléphones autour (en haut à gauche, sauf quand la pastille « Mise à jour » est là)
@@ -4748,10 +4750,14 @@ fun BoxScope.ReoFenuaAroundLayer(viewModel: ChatViewModel, topPadding: Dp, hideP
                 .zIndex(11f)
                 .padding(top = topPadding + 6.dp, start = 10.dp)
                 .clip(RoundedCornerShape(50))
-                .clickable { ReoFenuaAround.show.value = true }
+                .clickable {
+                    // Ouvre directement la liste des personnes disponibles autour
+                    ReoFenuaHome.search.value = true
+                    ReoFenuaHome.show.value = true
+                }
         ) {
             Text(
-                text = "📡 " + reoAroundText(n),
+                text = "🐚 " + reoAroundText(n),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
@@ -4806,7 +4812,7 @@ private fun ReoFenuaAroundDialog(n: Int) {
     Dialog(onDismissRequest = close) {
         Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge) {
             Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "📡 Autour de moi", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(text = "🐚 Autour de moi", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Text(
                     text = if (n <= 0) "En ce moment, aucun téléphone avec Reo Fenua n'est à portée."
                     else if (n == 1) "En ce moment, 1 téléphone avec Reo Fenua est à portée."
@@ -4840,6 +4846,193 @@ private fun ReoFenuaAroundDialog(n: Int) {
                 OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
                     Text(text = "Fermer", fontSize = 17.sp)
                 }
+            }
+        }
+    }
+}
+
+// ===================== Notifications quand l'app est en arrière-plan =====================
+//
+// BitChat prévient déjà pour les messages privés et les « @prénom ».
+// Reo Fenua ajoute :
+//  - les ALERTES reçues en public : notification prioritaire, son du pū, vibration (toujours) ;
+//  - en option (éteint par défaut) : les messages de « Autour de moi », regroupés, au plus une fois toutes les 3 minutes.
+// Rien n'est enregistré ni envoyé : tout se passe sur ce téléphone.
+
+object ReoFenuaAlertNotify {
+    private const val CH_ALERT = "reo_alertes_v1"
+    private const val CH_PUBLIC = "reo_autour_v1"
+    private const val ID_PUBLIC = 47201
+    private const val PREFS = "reo_fenua_guide"
+    private const val KEY_PUBLIC = "notify_public"
+
+    /** Alerte à montrer en grand à l'ouverture de l'app (venue d'une notification). */
+    val pending = mutableStateOf<Pair<String, String>?>(null)
+    val publicOn = mutableStateOf(false)
+    private var publicLoaded = false
+    private var lastPublicShown = 0L
+    private var publicCount = 0
+
+    fun loadPublic(context: Context) {
+        if (publicLoaded) return
+        publicLoaded = true
+        publicOn.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PUBLIC, false)
+    }
+
+    fun setPublic(context: Context, on: Boolean) {
+        publicOn.value = on
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PUBLIC, on).apply()
+    }
+
+    /** L'app est revenue à l'écran : on efface le regroupement « Autour de moi ». */
+    fun onAppVisible(context: Context) {
+        publicCount = 0
+        try { androidx.core.app.NotificationManagerCompat.from(context).cancel(ID_PUBLIC) } catch (_: Exception) { }
+    }
+
+    /** Appelé par BitChat pour chaque message public reçu en Bluetooth. */
+    fun onPublicMessage(context: Context, m: com.bitchat.android.model.BitchatMessage, inBackground: Boolean) {
+        try {
+            if (m.sender == "system") return
+            ReoFenuaBlock.load(context)
+            val pid = m.senderPeerID
+            if (pid != null && ReoFenuaBlock.isBlocked(pid)) return
+            if (m.content.startsWith(ReoFenuaAlert.PREFIX)) {
+                // App à l'écran : la grande fenêtre d'alerte de Reo Fenua s'en charge.
+                if (!inBackground) return
+                if (!ReoFenuaAlert.allowIncoming(pid ?: ("nom:" + m.sender))) return
+                showAlert(context, reoStripAvatarTag(m.sender), m.content.removePrefix(ReoFenuaAlert.PREFIX))
+            } else if (inBackground) {
+                loadPublic(context)
+                if (publicOn.value) showPublic(context, reoStripAvatarTag(m.sender), m.content)
+            }
+        } catch (_: Exception) {
+            // une notification ratée ne doit jamais gêner la réception des messages
+        }
+    }
+
+    private fun channels(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT < 26) return
+        val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (nm.getNotificationChannel(CH_ALERT) == null) {
+            val ch = android.app.NotificationChannel(CH_ALERT, "ALERTES reçues", android.app.NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "Une personne autour de vous demande de l'aide."
+            ch.enableVibration(true)
+            ch.vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 900)
+            ch.setSound(
+                android.net.Uri.parse("android.resource://" + context.packageName + "/raw/reo_pu"),
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            nm.createNotificationChannel(ch)
+        }
+        if (nm.getNotificationChannel(CH_PUBLIC) == null) {
+            val ch = android.app.NotificationChannel(CH_PUBLIC, "Messages autour de moi", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+            ch.description = "Messages publics des personnes autour (réglage dans Plus)."
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    private fun openIntent(context: Context, alert: Boolean): android.app.PendingIntent {
+        val intent = android.content.Intent(context, com.bitchat.android.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return android.app.PendingIntent.getActivity(
+            context,
+            if (alert) 47202 else 47203,
+            intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun showAlert(context: Context, sender: String, text: String) {
+        channels(context)
+        pending.value = Pair(sender, text)
+        val n = androidx.core.app.NotificationCompat.Builder(context, CH_ALERT)
+            .setSmallIcon(com.bitchat.android.R.drawable.ic_notification)
+            .setContentTitle("ALERTE · $sender")
+            .setContentText(text)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text + "\nTouchez pour ouvrir Reo Fenua. En cas de danger : 15, 17, 18."))
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(openIntent(context, true))
+            .build()
+        try {
+            androidx.core.app.NotificationManagerCompat.from(context)
+                .notify(47300 + (System.currentTimeMillis() % 100).toInt(), n)
+        } catch (_: SecurityException) {
+            // notifications refusées : la carte « Mon téléphone » le signale
+        }
+        // Vibre même en mode vibreur, comme l'alerte reçue app ouverte
+        ReoFenuaSound.vibrateAlert(context)
+    }
+
+    private fun showPublic(context: Context, sender: String, text: String) {
+        publicCount += 1
+        val now = System.currentTimeMillis()
+        if (now - lastPublicShown < 3 * 60_000L) return
+        lastPublicShown = now
+        channels(context)
+        val title = if (publicCount <= 1) "Nouveau message autour de vous" else "$publicCount nouveaux messages autour de vous"
+        val n = androidx.core.app.NotificationCompat.Builder(context, CH_PUBLIC)
+            .setSmallIcon(com.bitchat.android.R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText("$sender : $text")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setContentIntent(openIntent(context, false))
+            .build()
+        try {
+            androidx.core.app.NotificationManagerCompat.from(context).notify(ID_PUBLIC, n)
+        } catch (_: SecurityException) { }
+    }
+}
+
+/** À l'écran principal : montre en grand l'alerte venue d'une notification, et efface le regroupement public. */
+@Composable
+fun ReoFenuaAlertNotifyHost() {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { ReoFenuaAlertNotify.onAppVisible(context) }
+    val p = ReoFenuaAlertNotify.pending.value
+    LaunchedEffect(p) {
+        if (p != null) {
+            ReoFenuaAlert.received.value = p
+            ReoFenuaAlertNotify.pending.value = null
+        }
+    }
+}
+
+/** Réglage « Me prévenir aussi pour Autour de moi » (dans Plus). */
+@Composable
+fun ReoFenuaPublicNotifySetting() {
+    val context = LocalContext.current
+    ReoFenuaAlertNotify.loadPublic(context)
+    val on = ReoFenuaAlertNotify.publicOn.value
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = "🔔 Être prévenu", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = "Les ALERTES et les messages privés vous préviennent toujours, même app fermée. " +
+                    "Vous pouvez aussi être prévenu des messages de « Autour de moi » (au plus une fois toutes les 3 minutes).",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = { ReoFenuaAlertNotify.setPublic(context, !on) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+            ) {
+                Text(
+                    text = if (on) "Autour de moi : prévenu ✓ (toucher pour arrêter)" else "Me prévenir aussi pour Autour de moi",
+                    fontSize = 16.sp
+                )
             }
         }
     }
@@ -5411,7 +5604,7 @@ fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             NavItem(
-                "Discussions",
+                "Messages",
                 NavIcon.Proches,
                 {
                     ReoFenuaHome.search.value = false
@@ -5907,6 +6100,7 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                 }
             }
             ReoFenuaSoundCard()
+            ReoFenuaPublicNotifySetting()
             ReoFenuaModeCard()
             if (!simple) ReoFenuaWallpaperCard()
 
@@ -5939,6 +6133,7 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
 
             SectionTitle("Sécurité")
             ReoFenuaLockSetting()
+            ReoFenuaScreenshotSetting()
             PlusButton("Vérifier un proche (QR code)") {
                 onClose()
                 viewModel.showVerificationSheet()
@@ -8972,6 +9167,87 @@ fun ReoFenuaResetSetting() {
         }
     }
 }
+
+// ===================== Empêcher les captures d'écran (facultatif, éteint par défaut) =====================
+//
+// Android FLAG_SECURE : captures et enregistrements de l'écran donnent une image noire,
+// et l'aperçu de l'app est masqué dans la liste des applis récentes.
+// Les fenêtres Compose (feuilles, dialogues) héritent de ce réglage.
+// Limite : cela ne protège que CE téléphone ; on peut toujours photographier l'écran avec un autre appareil.
+
+object ReoFenuaNoCapture {
+    private const val PREFS = "reo_fenua_guide"
+    private const val KEY = "no_screenshots"
+    val on = mutableStateOf(false)
+    private var loaded = false
+
+    fun load(context: Context) {
+        if (loaded) return
+        loaded = true
+        on.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
+    }
+
+    fun set(context: Context, value: Boolean) {
+        on.value = value
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
+    }
+}
+
+private fun reoFindActivity(context: Context): android.app.Activity? {
+    var c: Context? = context
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
+
+/** À poser une fois sur l'écran principal : applique le réglage à la fenêtre de l'app. */
+@Composable
+fun ReoFenuaNoCaptureHost() {
+    val context = LocalContext.current
+    ReoFenuaNoCapture.load(context)
+    val on = ReoFenuaNoCapture.on.value
+    LaunchedEffect(on) {
+        val w = reoFindActivity(context)?.window ?: return@LaunchedEffect
+        if (on) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+}
+
+/** Réglage dans Plus > Sécurité. */
+@Composable
+fun ReoFenuaScreenshotSetting() {
+    val context = LocalContext.current
+    ReoFenuaNoCapture.load(context)
+    val on = ReoFenuaNoCapture.on.value
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = if (on) "🛡 Captures d'écran : bloquées" else "Captures d'écran : autorisées",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Bloquées, personne ne peut faire de capture ni de vidéo de l'écran de Reo Fenua sur ce téléphone, " +
+                    "et l'app est masquée dans la liste des applis récentes. " +
+                    "Attention : vous ne pourrez plus garder de preuve d'un message gênant, " +
+                    "et cela ne protège pas vos messages sur le téléphone des autres.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = { ReoFenuaNoCapture.set(context, !on) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+            ) { Text(text = if (on) "Autoriser les captures" else "Bloquer les captures", fontSize = 17.sp) }
+        }
+    }
+}
 '''
 STYLE_KT = r'''package com.bitchat.android.ui
 
@@ -9717,6 +9993,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -9944,7 +10221,7 @@ fun BoxScope.ReoFenuaHomeLayer(viewModel: ChatViewModel) {
             .zIndex(30f),
         color = MaterialTheme.colorScheme.background
     ) {
-        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
+        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).windowInsetsPadding(WindowInsets.navigationBars)) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (ReoFenuaHome.search.value) HomeSearch(viewModel) else HomeList(viewModel)
             }
@@ -10078,7 +10355,7 @@ private fun HomeList(viewModel: ChatViewModel) {
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Bubble(label = "Autour", onClick = { openPublic(viewModel, context) }) {
-                RoundIcon("📡", HLagon, Color.White, 60.dp)
+                RoundIcon("🐚", HLagon, Color.White, 60.dp)
             }
             for (pid in online) {
                 val n = ReoFenuaContacts.nameFor(pid, nicknames[pid] ?: "?")
@@ -10102,7 +10379,7 @@ private fun HomeList(viewModel: ChatViewModel) {
         val pub = publicMsgs.lastOrNull { it.sender != "system" }
         ListRow(
             onClick = { openPublic(viewModel, context) },
-            leading = { RoundIcon("📡", HLagon, Color.White, 54.dp) },
+            leading = { RoundIcon("🐚", HLagon, Color.White, 54.dp) },
             title = "Autour de moi (public)",
             subtitle = if (pub != null) pub.sender + " : " + pub.content.replace('\n', ' ')
             else if (online.isEmpty()) "Personne autour pour l'instant"
@@ -10258,7 +10535,10 @@ private fun HomeSearch(viewModel: ChatViewModel) {
             )
         }
 
-        SectionLabel("Autour de moi en ce moment")
+        SectionLabel(
+            "Autour de moi en ce moment : " +
+                (if (online.isEmpty()) "personne" else if (online.size == 1) "1 personne" else online.size.toString() + " personnes")
+        )
         val here = online.filter {
             q.isEmpty() || ReoFenuaContacts.nameFor(it, nicknames[it] ?: "").lowercase().contains(q)
         }
@@ -10293,6 +10573,16 @@ private fun HomeSearch(viewModel: ChatViewModel) {
                 }
             )
         }
+
+        // Inviter : par beau temps, pour que plus de monde ait Reo Fenua autour de soi
+        val ctx = LocalContext.current
+        ListRow(
+            onClick = { reoFenuaInvite(ctx) },
+            leading = { RoundIcon("➕", HSable, HOcean, 52.dp) },
+            title = "Inviter un proche",
+            subtitle = "Défi : faites monter ce chiffre ! (rien n'est compté ni gardé)",
+            unread = false
+        )
 
         val away = favs.filter { f ->
             val h = hexOf(f.peerNoisePublicKey)?.lowercase()
@@ -11073,6 +11363,28 @@ if t.count(old_bg) == 1:
 else:
     warn("Refus de la position en arrière-plan : emplacement introuvable.")
 
+# ---------- 7b. Notifications Reo Fenua (ALERTES en arrière-plan, option « Autour de moi ») ----------
+nmf = UI / "NotificationManager.kt"
+t = nmf.read_text() if nmf.exists() else ""
+anchor_nm = "    fun showPrivateMessageNotification(senderPeerID: String, senderNickname: String, messageContent: String) {"
+if t.count(anchor_nm) == 1 and "reoPublicMessage" not in t:
+    nmf.write_text(t.replace(anchor_nm,
+        "    /** Reo Fenua : alertes et messages publics reçus quand l'app est en arrière-plan. */\n"
+        "    fun reoPublicMessage(message: com.bitchat.android.model.BitchatMessage) {\n"
+        "        ReoFenuaAlertNotify.onPublicMessage(context, message, isAppInBackground)\n"
+        "    }\n\n" + anchor_nm))
+    print("Notifications Reo Fenua : point d'entrée ajouté.")
+else:
+    warn("Notifications Reo Fenua : NotificationManager introuvable.")
+mdh = UI / "MeshDelegateHandler.kt"
+t = mdh.read_text() if mdh.exists() else ""
+anchor_md = "                checkAndTriggerMeshMentionNotification(message)\n"
+if t.count(anchor_md) == 1:
+    mdh.write_text(t.replace(anchor_md, anchor_md + "                notificationManager.reoPublicMessage(message)\n"))
+    print("Notifications Reo Fenua : messages publics branchés.")
+else:
+    warn("Notifications Reo Fenua : réception des messages publics introuvable.")
+
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
 t = imf.read_text() if imf.exists() else ""
@@ -11222,6 +11534,22 @@ if "<queries>" not in m and m.count("    <application") == 1:
 else:
     warn("Manifeste : bloc queries non ajouté.")
 man.write_text(m)
+
+# Autorisation interne propre à Reo Fenua : avec le même nom que BitChat (« signature »),
+# Android refusait d'installer BitChat et Reo Fenua sur le même téléphone.
+_man = pathlib.Path("app/src/main/AndroidManifest.xml")
+_m = _man.read_text()
+_ac = pathlib.Path("app/src/main/java/com/bitchat/android/util/AppConstants.kt")
+_a = _ac.read_text() if _ac.exists() else ""
+_OLD_P = "com.bitchat.android.permission.FORCE_FINISH"
+_NEW_P = "pf.reofenua.app.permission.FORCE_FINISH"
+if _m.count(_OLD_P) >= 1 and _a.count('"' + _OLD_P + '"') == 1:
+    _man.write_text(_m.replace(_OLD_P, _NEW_P))
+    _ac.write_text(_a.replace('"' + _OLD_P + '"', '"' + _NEW_P + '"')
+                     .replace('"com.bitchat.android.ACTION_FORCE_FINISH"', '"pf.reofenua.app.ACTION_FORCE_FINISH"'))
+    print("Autorisation interne renommée : BitChat et Reo Fenua peuvent cohabiter.")
+else:
+    warn("Autorisation interne : emplacement introuvable, BitChat ne pourra pas être installé à côté.")
 
 # FAILLE : bitchat-android ajoute aux builds « debug » un récepteur de test ouvert à toutes les apps
 # (envoi de messages, paquets bruts…). Reo Fenua est construite en debug : on le retire complètement.
