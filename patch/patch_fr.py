@@ -11385,6 +11385,35 @@ if t.count(anchor_md) == 1:
 else:
     warn("Notifications Reo Fenua : réception des messages publics introuvable.")
 
+# ---------- 7c. Correction Bluetooth reprise de BitChat (commit f2d04fe1, 8 nov. 2026) ----------
+# Après un échec « already started », la recherche Bluetooth ne repartait jamais :
+# le téléphone restait visible mais ne cherchait plus les autres.
+gcm = pathlib.Path("app/src/main/java/com/bitchat/android/mesh/BluetoothGattClientManager.kt")
+t = gcm.read_text() if gcm.exists() else ""
+_fix = [
+    ("        scanCallback = object : ScanCallback() {\n",
+     "        // Reo Fenua (correctif BitChat f2d04fe1) : un seul rappel réutilisé\n"
+     "        scanCallback = scanCallback ?: object : ScanCallback() {\n"),
+    ("                isCurrentlyScanning = false\n                lastScanStopTime = System.currentTimeMillis()\n\n                when (errorCode) {\n                    1 -> {\n"
+     "                        // Already started: the stack thinks a scan is running. Re-arm from a clean\n"
+     "                        // state so we don't stay wedged (stop then restart with backoff).\n"
+     "                        stopScanning()\n",
+     "                isCurrentlyScanning = false\n                lastScanStopTime = System.currentTimeMillis()\n"
+     "                stopScanning(force = true)\n\n                when (errorCode) {\n                    1 -> {\n"),
+    ("    private fun stopScanning() {\n", "    private fun stopScanning(force: Boolean = false) {\n"),
+    ("        if (isCurrentlyScanning) {\n            try {\n                scanCallback?.let {\n",
+     "        if (isCurrentlyScanning || force) {\n            try {\n                scanCallback?.let {\n"),
+]
+if all(t.count(a) == 1 for a, _ in _fix):
+    for a, b in _fix:
+        t = t.replace(a, b)
+    gcm.write_text(t)
+    print("Correctif Bluetooth (recherche des téléphones) appliqué.")
+elif "stopScanning(force: Boolean" in t:
+    print("Correctif Bluetooth déjà présent dans BitChat.")
+else:
+    warn("Correctif Bluetooth : emplacement introuvable.")
+
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
 t = imf.read_text() if imf.exists() else ""
