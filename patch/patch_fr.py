@@ -8592,6 +8592,25 @@ fun ReoFenuaDiagCard() {
         }
     }
 }
+
+// ===================== Diagnostic Bluetooth (console de debug) =====================
+//
+// Recopie les messages importants de la couche Bluetooth de BitChat dans la « console de debug »
+// (Plus > Réglages techniques > Réglages > Paramètres de debug), pour comprendre sur le téléphone
+// pourquoi deux appareils ne se connectent pas. Rien n'est enregistré ni envoyé.
+object ReoFenuaDiag {
+    private fun post(level: String, msg: String) {
+        try {
+            com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().addDebugMessage(
+                com.bitchat.android.ui.debug.DebugMessage.SystemMessage("BT $level " + msg.take(220))
+            )
+        } catch (_: Throwable) { }
+    }
+    fun d(tag: String, msg: String): Int { post("·", msg); return android.util.Log.d(tag, msg) }
+    fun i(tag: String, msg: String): Int { post("i", msg); return android.util.Log.i(tag, msg) }
+    fun w(tag: String, msg: String): Int { post("⚠", msg); return android.util.Log.w(tag, msg) }
+    fun e(tag: String, msg: String): Int { post("✕", msg); return android.util.Log.e(tag, msg) }
+}
 '''
 VAULT_KT = r'''package com.bitchat.android.ui
 
@@ -11413,6 +11432,26 @@ elif "stopScanning(force: Boolean" in t:
     print("Correctif Bluetooth déjà présent dans BitChat.")
 else:
     warn("Correctif Bluetooth : emplacement introuvable.")
+
+# ---------- 7d. Diagnostic : messages Bluetooth recopiés dans la console de debug ----------
+_MESH = pathlib.Path("app/src/main/java/com/bitchat/android/mesh")
+_diag_n = 0
+_KEY = re.compile(r"onnect|MTU|ervice|dvertis|haracteristic|CCCD|ubscri|can |GATT|Gatt", re.I)
+for _fn in ("BluetoothGattClientManager.kt", "BluetoothGattServerManager.kt",
+            "BluetoothConnectionManager.kt", "BluetoothConnectionTracker.kt"):
+    _f = _MESH / _fn
+    if not _f.exists():
+        warn("Diagnostic Bluetooth : %s introuvable." % _fn)
+        continue
+    _out = []
+    for _l in _f.read_text().split("\n"):
+        _m = re.match(r"^(\s*)Log\.([dwei])\(TAG, (.*)\)\s*$", _l)
+        if _m and (_m.group(2) in "wei" or _KEY.search(_m.group(3))) and "parse packet" not in _l and "Dropping packet" not in _l:
+            _l = "%scom.bitchat.android.ui.ReoFenuaDiag.%s(TAG, %s)" % (_m.group(1), _m.group(2), _m.group(3))
+            _diag_n += 1
+        _out.append(_l)
+    _f.write_text("\n".join(_out))
+print("Diagnostic Bluetooth : %d messages recopiés dans la console de debug." % _diag_n)
 
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
