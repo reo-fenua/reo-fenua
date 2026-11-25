@@ -259,7 +259,7 @@ perm_type_background_location	Fonctionner écran éteint
 perm_background_location_desc	Pour recevoir les messages même quand l'application est fermée (conseillé)
 perm_background_location_system	Autoriser tout le temps
 permission_bluetooth_rationale	Le Bluetooth sert à parler aux téléphones proches, sans internet.
-permission_location_rationale	Android demande la localisation pour trouver les téléphones proches. Votre position n'est jamais utilisée.
+permission_location_rationale	Android appelle cela « position », car le Bluetooth sert à trouver les téléphones autour de vous. Reo Fenua ne s'en sert que pour cela : votre position n'est envoyée à personne.
 permission_notification_rationale	Les notifications vous préviennent quand un message arrive.
 bluetooth_recommended	Allumez le Bluetooth
 bluetooth_needs_for	Le Bluetooth permet à Reo Fenua de :
@@ -520,7 +520,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Qui peut lire mes messages ?",
-        "Les messages écrits dans « Autour de moi » sont lus par tous ceux qui sont autour. Pour un message privé et chiffré, touchez « Proches » en bas, puis « Écrire à… ». Le texte gris de la case d'écriture dit toujours qui pourra lire."
+        "Les messages écrits dans « Autour de moi » sont lus par tous ceux qui sont autour. Pour un message privé et chiffré, touchez « Discussions » en bas, puis le nom de la personne. Le texte gris de la case d'écriture dit toujours qui pourra lire."
     ),
     HelpItem(
         "Comment changer mon nom ?",
@@ -540,7 +540,7 @@ private val helpItems = listOf(
     ),
     HelpItem(
         "Comment bloquer quelqu'un ?",
-        "Touchez « Proches » en bas, puis « Noms, photos et blocage ». Sous la personne, touchez « Bloquer cette personne » et confirmez. Vous ne recevrez plus ses messages ni ses lettres. Vous pouvez la débloquer au même endroit."
+        "Touchez « Discussions » en bas, puis « ⋯ » au bout de la ligne de la personne, puis « Bloquer » et confirmez. La personne doit être à portée. Vous ne recevrez plus ses messages ni ses lettres. Pour débloquer : même « ⋯ », puis « Débloquer »."
     ),
     HelpItem(
         "Comment tout effacer en urgence ?",
@@ -812,7 +812,7 @@ private val guideSteps = listOf(
     Step("Écrire à tout le monde",
         "En bas, touchez « écrire un message… », tapez votre texte, puis touchez la flèche pour envoyer.\n\nTout le monde autour de vous le reçoit."),
     Step("Écrire à une seule personne",
-        "En bas, touchez « Proches », puis « Écrire à… » sous la personne. Si elle n'est pas autour, une lettre l'attend.\n\nVotre message privé est chiffré : seule cette personne peut le lire."),
+        "En bas, touchez « Discussions », puis le nom de la personne. Pour trouver quelqu'un, touchez « Rechercher une personne ». Si elle n'est pas autour, envoyez plutôt une lettre (bouton « Lettres ») : elle attend jusqu'à 24 h.\n\nVotre message privé est chiffré : seule cette personne peut le lire."),
     Step("Envoyer une photo",
         "Touchez le bouton de l'appareil photo pour choisir une photo dans votre galerie.\n\nPour prendre une photo tout de suite, gardez le doigt appuyé sur ce bouton."),
     Step("Envoyer un document ou une vidéo",
@@ -824,11 +824,11 @@ private val guideSteps = listOf(
     Step("En cas d'urgence : Alerte",
         "Touchez le gros bouton rouge « ALERTE », au milieu en bas.\n\nChoisissez « Je vais bien », « J'ai besoin d'aide », « Besoin d'eau »… Vous avez 3 secondes pour toucher « Annuler », puis le message part avec votre nom et votre lieu, sans rien écrire."),
     Step("Écrire une lettre",
-        "En bas, touchez « Proches », puis « Boîte aux lettres ».\n\nUne lettre peut aller à quelqu'un qui n'est pas là : elle attend jusqu'à 24 h et part dès que la personne est joignable."),
+        "En bas, touchez « Lettres ».\n\nUne lettre peut aller à quelqu'un qui n'est pas là : elle attend jusqu'à 24 h et part dès que la personne est joignable."),
     Step("Partager l'application",
         "En bas, touchez « Plus », puis « Partager Reo Fenua ».\n\nPlus il y a de téléphones, plus les messages vont loin."),
     Step("Besoin d'aide ?",
-        "En bas, touchez « Plus » pour la taille du texte, le son, le fond d'écran, la carte du réseau, le mode relais et le partage.\n\nLe bouton « Aide », en bas, vous ramène toujours à ce mode d'emploi.")
+        "En bas, touchez « Plus » pour la taille du texte, le son, le fond d'écran, la carte du réseau, le mode relais et le partage.\n\nCe mode d'emploi est toujours dans « Plus », rubrique « Aide ».")
 )
 
 object ReoFenuaSteps {
@@ -1027,6 +1027,14 @@ fun BoxScope.ReoFenuaHelpButton(viewModel: ChatViewModel, topPadding: Dp) {
             .padding(top = topPadding + 58.dp, start = 12.dp, end = 12.dp)
     )
     ReoFenuaFirstHello(viewModel)
+    // Accueil « Discussions » par-dessus tout l'écran principal
+    ReoFenuaHomeLayer(viewModel)
+    // Nombre de téléphones autour (en haut à gauche, sauf quand la pastille « Mise à jour » est là)
+    ReoFenuaAroundLayer(
+        viewModel = viewModel,
+        topPadding = topPadding,
+        hidePill = newVersion != null && !ReoFenuaUpdate.bannerHidden.value
+    )
     // Petits gestes reçus : l'animal traverse aussi l'écran principal
     ReoFenuaGestesLayer(viewModel = viewModel, peerID = null, peerName = "")
     // Pastille « Mode » bien visible, en haut à droite
@@ -1786,6 +1794,9 @@ fun BoxScope.ReoFenuaFirstHello(viewModel: ChatViewModel) {
     ReoFenuaHello.load(context)
     if (!ReoFenuaHello.show.value) return
     if (ReoFenuaGuide.showIntro.value || ReoFenuaName.needsAsk.value || ReoFenuaCharter.needs.value || ReoFenuaMove.show.value) return
+    val phoneTick = ReoFenuaPhone.refresh.value
+    val phoneReady = remember(phoneTick) { !ReoFenuaPhone.notReady(context) }
+    if (!phoneReady) return
     val privatePeer by viewModel.selectedPrivateChatPeer.collectAsState()
     val channel by viewModel.currentChannel.collectAsState()
     val location by viewModel.selectedLocationChannel.collectAsState()
@@ -1903,7 +1914,23 @@ object ReoFenuaUpdate {
         return false
     }
 
-    /** Vérifie au lancement puis toutes les 3 heures tant que l'app est ouverte (si internet). */
+    private const val AUTO_PREFS = "reo_fenua_guide"
+    private const val AUTO_KEY = "auto_update_check"
+    val autoCheck = androidx.compose.runtime.mutableStateOf(true)
+    private var autoLoaded = false
+
+    fun loadAuto(context: Context) {
+        if (autoLoaded) return
+        autoLoaded = true
+        autoCheck.value = context.getSharedPreferences(AUTO_PREFS, Context.MODE_PRIVATE).getBoolean(AUTO_KEY, true)
+    }
+
+    fun setAuto(context: Context, on: Boolean) {
+        autoCheck.value = on
+        context.getSharedPreferences(AUTO_PREFS, Context.MODE_PRIVATE).edit().putBoolean(AUTO_KEY, on).apply()
+    }
+
+    /** Vérifie au lancement puis toutes les 3 heures tant que l'app est ouverte (si internet et si permis). */
     suspend fun checkInBackground(context: Context? = null) {
         if (running) return
         running = true
@@ -1918,7 +1945,8 @@ object ReoFenuaUpdate {
             } catch (_: Exception) {
             }
             while (true) {
-                try {
+                if (context != null) loadAuto(context)
+                if (autoCheck.value) try {
                     val r = withContext(Dispatchers.IO) { fetchLatest() }
                     if (r != null && isNewer(r.tag)) available.value = r.tag
                 } catch (e: Exception) {
@@ -2119,6 +2147,7 @@ fun ReoFenuaUpdateCard() {
     var downloading by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var ready by remember { mutableStateOf(false) }
+    ReoFenuaUpdate.loadAuto(context)
 
     fun startInstall() {
         try {
@@ -2369,6 +2398,41 @@ fun ReoFenuaMoveNotice() {
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) { Text(text = "Plus tard", fontSize = 16.sp) }
             }
+        }
+    }
+}
+
+
+/** Interrupteur : laisser Reo Fenua demander tout seul à GitHub s'il existe une nouvelle version. */
+@Composable
+fun ReoFenuaAutoUpdateSetting() {
+    val context = LocalContext.current
+    ReoFenuaUpdate.loadAuto(context)
+    val on = ReoFenuaUpdate.autoCheck.value
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Chercher les nouvelles versions tout seul",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (on) "Quand il y a internet, Reo Fenua demande à GitHub s'il existe une nouvelle version. Rien d'autre n'est envoyé."
+                    else "Éteint : Reo Fenua ne contacte plus GitHub tout seul. Touchez « Rechercher une mise à jour » quand vous voulez.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = { ReoFenuaUpdate.setAuto(context, it) })
         }
     }
 }
@@ -3152,6 +3216,26 @@ object ReoFenuaSound {
     val choice = mutableStateOf(-1)
     private var lastPlay = 0L
 
+    fun vibrateAlert(context: Context) {
+        try {
+            val pattern = longArrayOf(0, 600, 300, 600, 300, 900)
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val vm = context.getSystemService(android.os.VibratorManager::class.java)
+                vm?.defaultVibrator?.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                val v = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    v?.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    v?.vibrate(pattern, -1)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     fun load(context: Context) {
         if (choice.value < 0) {
             choice.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY, 0)
@@ -3180,7 +3264,11 @@ object ReoFenuaSound {
         if (!force && now - lastPlay < 1500) return
         lastPlay = now
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        if (audio != null && audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        if (audio != null && audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+            // Téléphone en vibreur ou silencieux : une alerte vibre quand même, un message ordinaire reste muet.
+            if (force) vibrateAlert(context)
+            return
+        }
         try {
             val player = MediaPlayer()
             player.setAudioAttributes(
@@ -3342,6 +3430,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -3353,6 +3448,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -3393,6 +3490,13 @@ fun reoFenuaStatusWord(status: DeliveryStatus): String = when (status) {
     is DeliveryStatus.Read -> "lu"
     is DeliveryStatus.Failed -> "pas encore parti"
     is DeliveryStatus.PartiallyDelivered -> "arrivé " + status.reached + "/" + status.total
+}
+
+/** Couleur du mot : vert quand le message est arrivé ou lu, orange s'il n'est pas encore parti. */
+fun reoFenuaStatusColor(status: DeliveryStatus, normal: Color): Color = when (status) {
+    is DeliveryStatus.Delivered, is DeliveryStatus.Read -> EVert
+    is DeliveryStatus.Failed -> Color(0xFFB35A00)
+    else -> normal
 }
 
 // ===================== Taille du texte =====================
@@ -3499,6 +3603,13 @@ object ReoFenuaBlock {
 
     fun isBlocked(key: String): Boolean = blocked[key] == true
 
+    /** Note localement un blocage déjà fait par BitChat (sans repli sur le nom). */
+    fun markBlocked(context: Context, key: String) {
+        load(context)
+        blocked[key] = true
+        save(context)
+    }
+
     /** Bloque par l'identifiant, sinon par le pseudo. Renvoie false si la personne est introuvable. */
     fun block(context: Context, viewModel: ChatViewModel, key: String, nickname: String): Boolean {
         load(context)
@@ -3568,6 +3679,9 @@ fun ReoFenuaAvatar(key: String, name: String, size: Dp) {
                 .size(size)
                 .clip(CircleShape)
         )
+    } else if (reoAvatarIndexOf(name) >= 0) {
+        // Avatar choisi par la personne elle-même (emoji devant son prénom)
+        ReoFenuaChosenAvatar(name = name, size = size)
     } else if (ReoFenuaStyle.stylised) {
         ReoFenuaDrawnAvatar(key = key, size = size)
     } else {
@@ -3578,7 +3692,7 @@ fun ReoFenuaAvatar(key: String, name: String, size: Dp) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = name.trim().take(1).uppercase(),
+                text = reoStripAvatarTag(name).trim().take(1).uppercase(),
                 fontSize = (size.value * 0.42f).sp,
                 fontWeight = FontWeight.Bold,
                 color = EOcean
@@ -3761,6 +3875,8 @@ private fun NameAsker(viewModel: ChatViewModel) {
     LaunchedEffect(myNick) { if (myNick.isNotBlank()) ReoFenuaName.load(context, myNick) }
     if (!ReoFenuaName.needsAsk.value || ReoFenuaGuide.showIntro.value) return
     var name by remember { mutableStateOf("") }
+    var stylised by remember { mutableStateOf(false) }
+    var avatar by remember { mutableStateOf(-1) }
 
     Dialog(
         onDismissRequest = { },
@@ -3793,11 +3909,34 @@ private fun NameAsker(viewModel: ChatViewModel) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Text(text = "Votre avatar (facultatif)", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = "Les personnes autour le verront à côté de votre prénom. Un dessin, jamais une photo.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    ReoFenuaAvatarPicker(selected = avatar) { avatar = it }
+                    Text(text = "Votre style", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        ReoStyleChoice(
+                            emoji = "🌺", title = "Simple", body = "Gros boutons, l'essentiel",
+                            selected = !stylised, modifier = Modifier.weight(1f)
+                        ) { stylised = false }
+                        ReoStyleChoice(
+                            emoji = "✨", title = "Stylisé", body = "Couleurs du fenua, avatars dessinés",
+                            selected = stylised, modifier = Modifier.weight(1f)
+                        ) { stylised = true }
+                    }
                     ReoFenuaCharterShort()
                     Button(
                         onClick = {
                             val n = name.trim()
-                            if (n.isNotEmpty()) viewModel.setNickname(n)
+                            if (n.isNotEmpty()) viewModel.setNickname(reoWithAvatarTag(n, avatar))
+                            if (stylised) {
+                                ReoFenuaMode.set(context, false)
+                                ReoFenuaStyle.load(context)
+                                if (ReoFenuaStyle.theme.value == null) ReoFenuaStyle.set(context, ReoTheme.PO)
+                            }
                             ReoFenuaName.done(context)
                             // Le même bouton vaut acceptation des règles de vie affichées juste au-dessus
                             ReoFenuaCharter.accept(context)
@@ -3806,7 +3945,7 @@ private fun NameAsker(viewModel: ChatViewModel) {
                         modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
                     ) { Text(text = "J'accepte et je continue", fontSize = 19.sp) }
                     Text(
-                        text = "Vous démarrez en mode simple. Le bouton « Mode », en haut à droite, permet de changer.",
+                        text = "Vous pourrez changer à tout moment avec le bouton « Mode », en haut à droite.",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3822,7 +3961,27 @@ private fun NameAsker(viewModel: ChatViewModel) {
 private fun ReceivedAlertDialog(viewModel: ChatViewModel) {
     val alert = ReoFenuaAlert.received.value ?: return
     val sender = alert.first
-    Dialog(onDismissRequest = { ReoFenuaAlert.received.value = null }) {
+    val scope = rememberCoroutineScope()
+    var info by remember(alert) { mutableStateOf("") }
+    // La réponse part en public, à proximité : la personne en alerte et ses voisins la voient.
+    fun reply(text: String) {
+        scope.launch {
+            if (viewModel.selectedPrivateChatPeer.value != null) viewModel.endPrivateChat()
+            val loc = viewModel.selectedLocationChannel.value
+            val meshOnly = viewModel.currentChannel.value == null &&
+                (loc == null || loc is com.bitchat.android.geohash.ChannelID.Mesh)
+            if (!meshOnly) {
+                info = "Revenez d'abord sur « À proximité » (pas dans un salon), puis réessayez."
+            } else {
+                viewModel.sendMessage(text)
+                ReoFenuaAlert.received.value = null
+            }
+        }
+    }
+    Dialog(
+        onDismissRequest = { ReoFenuaAlert.received.value = null },
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = false)
+    ) {
         Surface(color = ERouge, shape = MaterialTheme.shapes.extraLarge) {
             Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(text = "ALERTE REÇUE", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -3833,18 +3992,17 @@ private fun ReceivedAlertDialog(viewModel: ChatViewModel) {
                     color = Color.White
                 )
                 Text(text = "Envoyée par : $sender", fontSize = 16.sp, color = Color.White)
+                if (info.isNotEmpty()) Text(text = info, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Button(
                     onClick = {
-                        viewModel.sendMessage("J'arrive pour vous aider, $sender !")
-                        ReoFenuaAlert.received.value = null
+                        reply("J'arrive pour vous aider, $sender !")
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = ERouge),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
                 ) { Text(text = "J'arrive", fontSize = 19.sp, fontWeight = FontWeight.Bold) }
                 Button(
                     onClick = {
-                        viewModel.sendMessage("Je préviens les secours pour $sender.")
-                        ReoFenuaAlert.received.value = null
+                        reply("Je préviens les secours pour $sender.")
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = ERouge),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -4420,6 +4578,272 @@ fun ReoFenuaModeCard() {
         }
     }
 }
+
+// ===================== Réponses en un toucher (dans les conversations) =====================
+
+private val reoRepliesPrivate = listOf(
+    "Oui", "Non", "Merci", "D'accord", "Je vais bien", "J'arrive", "Où es-tu ?", "Appelle-moi", "Ia ora na"
+)
+private val reoRepliesPublic = listOf(
+    "Ia ora na", "Qui est là ?", "Je vais bien", "Merci", "D'accord", "À tout à l'heure"
+)
+
+/**
+ * Rangée de gros boutons au-dessus de la case d'écriture, pour répondre sans clavier.
+ * On touche un bouton : 5 secondes pour annuler, puis le message part.
+ * Cachée dès qu'on commence à écrire. Si on change de conversation, l'envoi prévu est annulé.
+ */
+@Composable
+fun ReoFenuaQuickReplies(
+    hasText: Boolean,
+    isPrivate: Boolean,
+    conversationKey: String,
+    showMicHint: Boolean,
+    onSendText: (String) -> Unit
+) {
+    var pending by remember(conversationKey) { mutableStateOf<String?>(null) }
+    var left by remember { mutableStateOf(5) }
+    val send by androidx.compose.runtime.rememberUpdatedState(onSendText)
+    LaunchedEffect(pending) {
+        val p = pending ?: return@LaunchedEffect
+        left = 5
+        while (left > 0) {
+            kotlinx.coroutines.delay(1000)
+            left -= 1
+        }
+        pending = null
+        send(p)
+    }
+    // Si la personne se met à écrire pendant le compte à rebours, on annule l'envoi prévu
+    LaunchedEffect(hasText) { if (hasText) pending = null }
+    if (hasText && pending == null) return
+    val list = if (isPrivate) reoRepliesPrivate else reoRepliesPublic
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 0.dp)) {
+        val p = pending
+        if (p != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (isPrivate) "« $p » part dans $left s"
+                    else "« $p » part pour tout le monde autour dans $left s",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                OutlinedButton(onClick = { pending = null }, modifier = Modifier.heightIn(min = 52.dp)) {
+                    Text(text = "Annuler", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for (r in list) {
+                    Button(
+                        onClick = { pending = r },
+                        modifier = Modifier.heightIn(min = 44.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ELagon, contentColor = Color.White)
+                    ) {
+                        Text(text = r, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Grosse carte de choix (Simple ou Stylisé) sur l'écran du prénom. */
+@Composable
+private fun ReoStyleChoice(
+    emoji: String,
+    title: String,
+    body: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(if (selected) ELagon else MaterialTheme.colorScheme.surface, shape)
+            .border(if (selected) 3.dp else 1.dp, if (selected) EVanille else MaterialTheme.colorScheme.outlineVariant, shape)
+            .clickable { onClick() }
+            .heightIn(min = 120.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(text = emoji, fontSize = 28.sp)
+        Text(
+            text = (if (selected) "✓ " else "") + title,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = body,
+            fontSize = 15.sp,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// ===================== Autour de moi : compteur en direct (rien n'est gardé) =====================
+
+object ReoFenuaAround {
+    val show = mutableStateOf(false)
+}
+
+/** Ouvre le partage du téléphone avec le lien de téléchargement de Reo Fenua. */
+fun reoFenuaInvite(context: Context) {
+    try {
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        send.type = "text/plain"
+        send.putExtra(
+            android.content.Intent.EXTRA_TEXT,
+            "Installe Reo Fenua, la messagerie qui marche même sans réseau, de téléphone en téléphone : https://github.com/" +
+                ReoFenuaUpdate.REPO + "/releases/latest"
+        )
+        val chooser = android.content.Intent.createChooser(send, "Inviter un proche")
+        chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    } catch (_: Exception) {
+        // aucune application de partage
+    }
+}
+
+private fun reoAroundText(n: Int): String = when {
+    n <= 0 -> "Personne autour"
+    n == 1 -> "1 autour de moi"
+    else -> n.toString() + " autour de moi"
+}
+
+/**
+ * Sur la discussion « Autour de moi » :
+ *  - une pastille en haut à gauche avec le nombre de téléphones Reo Fenua à portée, en direct ;
+ *  - tant qu'aucun message n'est affiché, une carte qui explique et propose d'inviter un proche.
+ * Le nombre est calculé à l'instant, jamais enregistré ni envoyé.
+ */
+@Composable
+fun BoxScope.ReoFenuaAroundLayer(viewModel: ChatViewModel, topPadding: Dp, hidePill: Boolean) {
+    val context = LocalContext.current
+    val peers by viewModel.connectedPeers.collectAsState()
+    val priv by viewModel.selectedPrivateChatPeer.collectAsState()
+    val chan by viewModel.currentChannel.collectAsState()
+    val messages by viewModel.messages.collectAsState()
+    val n = peers.count { it != viewModel.myPeerID }
+    if (ReoFenuaAround.show.value) ReoFenuaAroundDialog(n)
+    if (priv != null || chan != null) return
+
+    if (!hidePill) {
+        Surface(
+            color = if (n == 0) EVanille else ELagon,
+            contentColor = if (n == 0) EOcean else Color.White,
+            shape = RoundedCornerShape(50),
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .zIndex(11f)
+                .padding(top = topPadding + 6.dp, start = 10.dp)
+                .clip(RoundedCornerShape(50))
+                .clickable { ReoFenuaAround.show.value = true }
+        ) {
+            Text(
+                text = "📡 " + reoAroundText(n),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+        }
+    }
+
+    if (messages.none { it.sender != "system" }) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(22.dp),
+            shadowElevation = 3.dp,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .zIndex(5f)
+                .padding(horizontal = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (n == 0) {
+                    Text(text = "Personne autour pour l'instant", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        text = "C'est normal. Reo Fenua passe de téléphone en téléphone, à environ 10 à 30 mètres. " +
+                            "Plus il y a de monde avec l'app, plus les messages vont loin.",
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else {
+                    Text(
+                        text = if (n == 1) "1 personne autour de vous" else n.toString() + " personnes autour de vous",
+                        fontSize = 21.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Dites bonjour : touchez « Ia ora na » en bas de l'écran.",
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Button(
+                    onClick = { reoFenuaInvite(context) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ELagon, contentColor = Color.White)
+                ) { Text(text = "Inviter un proche", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReoFenuaAroundDialog(n: Int) {
+    val context = LocalContext.current
+    val close = { ReoFenuaAround.show.value = false }
+    Dialog(onDismissRequest = close) {
+        Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge) {
+            Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text = "📡 Autour de moi", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = if (n <= 0) "En ce moment, aucun téléphone avec Reo Fenua n'est à portée."
+                    else if (n == 1) "En ce moment, 1 téléphone avec Reo Fenua est à portée."
+                    else "En ce moment, " + n + " téléphones avec Reo Fenua sont à portée.",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Ce sont vos voisins directs. Vos messages peuvent aller plus loin, de téléphone en téléphone. " +
+                        "Ce nombre n'est gardé nulle part et n'est envoyé à personne.",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Défi : faites monter ce chiffre en invitant vos proches et vos voisins !",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ELagon
+                )
+                Text(
+                    text = "Reo Fenua ne remplace pas les secours (15, 17, 18).",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = { reoFenuaInvite(context) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ELagon, contentColor = Color.White)
+                ) { Text(text = "Inviter un proche", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                    Text(text = "Fermer", fontSize = 17.sp)
+                }
+            }
+        }
+    }
+}
 '''
 NETWORK_KT = r'''package com.bitchat.android.ui
 
@@ -4886,7 +5310,7 @@ private fun FullScreen(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 
 // ===================== Barre du bas =====================
 
-private enum class NavIcon { Radar, Proches, Alerte, Aide, Plus }
+private enum class NavIcon { Radar, Proches, Alerte, Aide, Plus, Lettres }
 
 @Composable
 private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier: Modifier = Modifier, badge: Int = 0) {
@@ -4929,7 +5353,7 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
                             drawCircle(color = tint, radius = s * 0.24f, center = Offset(s * 0.34f, s * 0.86f), style = Stroke(width = line))
                             drawCircle(color = tint, radius = s * 0.24f, center = Offset(s * 0.68f, s * 0.86f), style = Stroke(width = line))
                         }
-                        NavIcon.Aide -> {
+                        NavIcon.Aide, NavIcon.Lettres -> {
                             drawCircle(color = tint, radius = s * 0.45f, center = c, style = Stroke(width = line))
                         }
                         else -> {
@@ -4941,6 +5365,9 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
                 }
                 if (icon == NavIcon.Aide) {
                     Text(text = "?", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = tint)
+                }
+                if (icon == NavIcon.Lettres) {
+                    Text(text = "✉", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = tint)
                 }
             }
             if (badge > 0) {
@@ -4966,7 +5393,7 @@ private fun NavItem(label: String, icon: NavIcon, onClick: () -> Unit, modifier:
     }
 }
 
-/** Barre du bas : Radar · Mes proches · ALERTE · Aide · Plus. Cachée quand le clavier est ouvert. */
+/** Barre du bas : Discussions · Radar · ALERTE · Lettres · Plus (l'aide est dans Plus). Cachée quand le clavier est ouvert. */
 @Composable
 fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -4983,16 +5410,18 @@ fun ReoFenuaBottomBar(viewModel: ChatViewModel) {
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            NavItem("Radar", NavIcon.Radar, { ReoFenuaNav.showRadar.value = true }, Modifier.weight(1f))
             NavItem(
-                "Proches",
+                "Discussions",
                 NavIcon.Proches,
-                { ReoFenuaNav.showProches.value = true },
-                Modifier.weight(1f),
-                badge = ReoFenuaLetters.unreadCount()
+                {
+                    ReoFenuaHome.search.value = false
+                    ReoFenuaHome.show.value = true
+                },
+                Modifier.weight(1.1f)
             )
-            NavItem("ALERTE", NavIcon.Alerte, { ReoFenuaAlert.show.value = true }, Modifier.weight(1.2f))
-            NavItem("Aide", NavIcon.Aide, { ReoFenuaSteps.show.value = true }, Modifier.weight(1f))
+            NavItem("Radar", NavIcon.Radar, { ReoFenuaNav.showRadar.value = true }, Modifier.weight(1f))
+            NavItem("ALERTE", NavIcon.Alerte, { ReoFenuaAlert.show.value = true }, Modifier.weight(1.1f))
+            NavItem("Lettres", NavIcon.Lettres, { ReoFenuaLetters.show.value = true }, Modifier.weight(1f), badge = ReoFenuaLetters.unreadCount())
             NavItem("Plus", NavIcon.Plus, { ReoFenuaNav.showPlus.value = true }, Modifier.weight(1f), badge = if (ReoFenuaUpdate.available.value != null || phoneNotReady) 1 else 0)
         }
     }
@@ -5096,9 +5525,9 @@ private fun RadarChoice(
                 text = (if (selected) "✓  " else "") + title,
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (enabled) VOcean else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (selected) VOcean else if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(text = body, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = body, fontSize = 15.sp, color = if (selected) Color(0xFF3E4F5A) else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -5442,12 +5871,16 @@ private fun PlusScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
         ) {
+            SectionTitle("Mon avatar")
+            ReoFenuaMyAvatarCard(viewModel)
+
             SectionTitle("Mon téléphone")
             ReoFenuaPhoneCard()
             ReoFenuaDiagCard()
 
             SectionTitle(if (ReoFenuaUpdate.available.value != null) "Nouvelle version disponible" else "Mise à jour")
             ReoFenuaUpdateCard()
+            ReoFenuaAutoUpdateSetting()
 
             SectionTitle("Réglages")
             Row(
@@ -7351,6 +7784,7 @@ fun ReoFenuaPhoneCard() {
     val tick = ReoFenuaPhone.refresh.value
     val items = remember(tick) { ReoFenuaPhone.items(context) }
     var asked by remember { mutableStateOf(false) }
+    var askedNotif by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
@@ -7390,9 +7824,9 @@ fun ReoFenuaPhoneCard() {
             ReoFenuaPhone.Need.NOTIFS -> {
                 if (Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-                    !asked
+                    !askedNotif
                 ) {
-                    asked = true
+                    askedNotif = true
                     notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
                     ReoFenuaPhone.openNotificationSettings(context)
@@ -7986,6 +8420,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -8141,14 +8577,18 @@ object ReoFenuaLock {
     }
 
     /** L'empreinte du code est elle-même chiffrée par le coffre-fort : inutilisable hors de ce téléphone. */
-    fun set(context: Context, pin: String) {
+    /** Faux si le coffre du téléphone n'a pas pu chiffrer : le code n'est alors pas enregistré. */
+    fun set(context: Context, pin: String): Boolean {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val sealed = ReoFenuaVault.seal(hash(pin, salt))
+        if (!ReoFenuaVault.isSealed(sealed)) return false
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(K_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-            .putString(K_HASH, ReoFenuaVault.seal(hash(pin, salt)))
+            .putString(K_HASH, sealed)
             .remove(K_FAILS).remove(K_UNTIL)
             .apply()
         enabled.value = true
+        return true
     }
 
     fun remove(context: Context) {
@@ -8261,7 +8701,22 @@ fun ReoFenuaLockHost(viewModel: ChatViewModel) {
         }
         onDispose { }
     }
-    if (!ReoFenuaLock.locked.value) return
+    // Une notification ne doit pas ouvrir une conversation par-dessus l'écran de code :
+    // on la referme pendant le verrouillage et on la rouvre après le bon code.
+    val sheetPeer = viewModel.privateChatSheetPeer.collectAsState().value
+    val lockedNow = ReoFenuaLock.locked.value
+    val heldPeer = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(lockedNow, sheetPeer) {
+        if (lockedNow && sheetPeer != null) {
+            heldPeer.value = sheetPeer
+            viewModel.hidePrivateChatSheet()
+        } else if (!lockedNow && heldPeer.value != null) {
+            val p = heldPeer.value
+            heldPeer.value = null
+            if (p != null) viewModel.showPrivateChatSheet(p)
+        }
+    }
+    if (!lockedNow) return
 
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -8363,6 +8818,7 @@ fun ReoFenuaLockSetting() {
     var a by remember { mutableStateOf("") }
     var b by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
     val has = ReoFenuaLock.enabled.value
     fun clear() { editing = false; removing = false; cur = ""; a = ""; b = ""; wrong = false }
     Surface(
@@ -8393,6 +8849,7 @@ fun ReoFenuaLockSetting() {
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (wrong) Text("Code actuel incorrect.", color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+                if (failed) Text("Ce téléphone n'a pas pu protéger le code. Il n'a pas été enregistré. Redémarrez le téléphone puis réessayez.", color = MaterialTheme.colorScheme.error, fontSize = 15.sp)
             }
             if (editing) {
                 OutlinedTextField(
@@ -8415,8 +8872,12 @@ fun ReoFenuaLockSetting() {
                             wrong = true
                             cur = ""
                         } else {
-                            ReoFenuaLock.set(context, a)
-                            clear()
+                            if (ReoFenuaLock.set(context, a)) {
+                                clear()
+                                failed = false
+                            } else {
+                                failed = true
+                            }
                         }
                     },
                     enabled = a.length >= 4 && a == b && (!has || cur.length >= 4),
@@ -8539,6 +9000,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -8695,13 +9157,115 @@ private val AvAcc = intArrayOf(0, R.drawable.reo_av_acc_1, R.drawable.reo_av_acc
 @Composable
 fun ReoFenuaDrawnAvatar(key: String, size: Dp) {
     val h = (key.hashCode().toLong() and 0x7fffffffL)
-    val face = AvFace[(h % AvFace.size).toInt()]
-    val acc = AvAcc[((h / AvFace.size) % AvAcc.size).toInt()]
-    val bg = AvBg[((h / (AvFace.size * AvAcc.size)) % AvBg.size).toInt()]
+    ReoDrawnAvatarParts(
+        face = (h % AvFace.size).toInt(),
+        acc = ((h / AvFace.size) % AvAcc.size).toInt(),
+        bg = ((h / (AvFace.size * AvAcc.size)) % AvBg.size).toInt(),
+        size = size
+    )
+}
+
+@Composable
+private fun ReoDrawnAvatarParts(face: Int, acc: Int, bg: Int, size: Dp) {
     Box(modifier = Modifier.size(size).clip(CircleShape)) {
-        Image(painter = painterResource(bg), contentDescription = null, modifier = Modifier.fillMaxSize())
-        Image(painter = painterResource(face), contentDescription = null, modifier = Modifier.fillMaxSize())
-        if (acc != 0) Image(painter = painterResource(acc), contentDescription = null, modifier = Modifier.fillMaxSize())
+        Image(painter = painterResource(AvBg[bg % AvBg.size]), contentDescription = null, modifier = Modifier.fillMaxSize())
+        Image(painter = painterResource(AvFace[face % AvFace.size]), contentDescription = null, modifier = Modifier.fillMaxSize())
+        val a = AvAcc[acc % AvAcc.size]
+        if (a != 0) Image(painter = painterResource(a), contentDescription = null, modifier = Modifier.fillMaxSize())
+    }
+}
+
+// ===================== Avatar choisi par la personne, visible par les autres =====================
+//
+// Le choix voyage dans le prénom, sous forme d'un emoji placé devant (« 🐢 Teva »).
+// Aucune photo, aucun changement du protocole : les autres applications BitChat voient l'emoji,
+// Reo Fenua affiche l'avatar dessiné correspondant.
+
+/** emoji, visage, accessoire, fond */
+private class ReoAvatarChoice(val tag: String, val face: Int, val acc: Int, val bg: Int)
+
+private val ReoAvatarChoices = listOf(
+    ReoAvatarChoice("🐢", 0, 0, 0), ReoAvatarChoice("🐬", 1, 1, 1), ReoAvatarChoice("🌺", 2, 2, 2),
+    ReoAvatarChoice("🐠", 3, 3, 3), ReoAvatarChoice("🥥", 4, 4, 4), ReoAvatarChoice("🌴", 5, 0, 1),
+    ReoAvatarChoice("🐚", 0, 2, 3), ReoAvatarChoice("🦀", 1, 3, 4), ReoAvatarChoice("⛵", 2, 4, 0),
+    ReoAvatarChoice("🌊", 3, 1, 2), ReoAvatarChoice("🐓", 4, 0, 3), ReoAvatarChoice("🌞", 5, 2, 4)
+)
+
+private fun reoAvatarIndex(name: String): Int {
+    val n = name.trimStart()
+    return ReoAvatarChoices.indexOfFirst { n.startsWith(it.tag + " ") }
+}
+
+/** Le prénom sans l'emoji d'avatar. */
+fun reoStripAvatarTag(name: String): String {
+    val i = reoAvatarIndex(name)
+    return if (i < 0) name else name.trimStart().removePrefix(ReoAvatarChoices[i].tag + " ")
+}
+
+/** Le prénom avec l'emoji de l'avatar choisi (index -1 = pas d'avatar). */
+fun reoWithAvatarTag(name: String, index: Int): String {
+    val bare = reoStripAvatarTag(name).trim()
+    return if (index !in ReoAvatarChoices.indices) bare else ReoAvatarChoices[index].tag + " " + bare
+}
+
+fun reoAvatarIndexOf(name: String): Int = reoAvatarIndex(name)
+
+/** Avatar choisi par la personne (d'après son prénom), ou null si elle n'en a pas choisi. */
+@Composable
+fun ReoFenuaChosenAvatar(name: String, size: Dp): Boolean {
+    val i = reoAvatarIndex(name)
+    if (i < 0) return false
+    val c = ReoAvatarChoices[i]
+    ReoDrawnAvatarParts(c.face, c.acc, c.bg, size)
+    return true
+}
+
+/** Grille de choix de son propre avatar. */
+@Composable
+fun ReoFenuaAvatarPicker(selected: Int, onSelect: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ReoAvatarChoices.indices.toList().chunked(4).forEach { rowIdx ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                rowIdx.forEach { i ->
+                    val c = ReoAvatarChoices[i]
+                    val sel = i == selected
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .then(if (sel) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
+                            .clickable { onSelect(if (sel) -1 else i) }
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ReoDrawnAvatarParts(c.face, c.acc, c.bg, 56.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Réglage « Mon avatar » (dans Plus). */
+@Composable
+fun ReoFenuaMyAvatarCard(viewModel: ChatViewModel) {
+    val nick by viewModel.nickname.collectAsState()
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(text = "Mon avatar", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = "Les personnes autour le verront à côté de votre prénom. Un dessin, jamais une photo.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            ReoFenuaAvatarPicker(selected = reoAvatarIndex(nick)) { i ->
+                viewModel.setNickname(reoWithAvatarTag(nick, i))
+            }
+        }
     }
 }
 
@@ -9132,6 +9696,862 @@ fun androidx.compose.foundation.layout.BoxScope.ReoFenuaThemedBackdrop(theme: Re
     }
 }
 '''
+HOME_KT = r'''package com.bitchat.android.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.bitchat.android.model.BitchatMessage
+
+// ===================== Accueil « Discussions » (inspiré de WhatsApp et Messenger) =====================
+//
+// L'app s'ouvre sur la liste des discussions :
+//  - en haut, des bulles : « Autour » (discussion publique), les personnes à portée, « + Nouveau » ;
+//  - la liste : la discussion publique, les groupes publics rejoints, puis les proches.
+// Les proches enregistrés sont les « favoris » de BitChat : gardés seulement sur ce téléphone.
+// Pastille verte = à portée en ce moment ; grise = pas autour. Rien n'est envoyé à un serveur.
+
+object ReoFenuaHome {
+    /** Affiché au lancement. */
+    val show = mutableStateOf(true)
+    val search = mutableStateOf(false)
+    val newGroup = mutableStateOf(false)
+    /** Menu ouvert en touchant le rond d'une personne. */
+    val menu = mutableStateOf<PersonRef?>(null)
+    /** Moment où « Ajouter par QR code » a été touché (0 = pas en cours). Valable 10 minutes. */
+    val qrAddSince = mutableStateOf(0L)
+}
+
+class PersonRef(val key: String, val name: String, val online: Boolean, val saved: Boolean, val ids: List<String> = listOf(key))
+
+private val HLagon = Color(0xFF0E7C86)
+private val HOcean = Color(0xFF0B3C5D)
+private val HVert = Color(0xFF2E7D32)
+private val HGris = Color(0xFF9E9E9E)
+private val HRouge = Color(0xFFC8102E)
+private val HSable = Color(0xFFFFF4DC)
+
+private class HomeRow(
+    val key: String,
+    val name: String,
+    val online: Boolean,
+    val last: String,
+    val time: Long,
+    val unread: Boolean,
+    val saved: Boolean,
+    val ids: List<String> = emptyList()
+)
+
+private fun hexOf(b: ByteArray?): String? =
+    if (b == null || b.isEmpty()) null else b.joinToString("") { "%02x".format(it) }
+
+private fun canonOf(id: String): String? =
+    try { com.bitchat.android.services.ContactDirectory.canonicalConversationId(id) } catch (_: Exception) { null }
+
+private fun savedFavorites(): List<com.bitchat.android.favorites.FavoriteRelationship> =
+    try { com.bitchat.android.favorites.FavoritesPersistenceService.shared.getOurFavorites() } catch (_: Exception) { emptyList() }
+
+private fun lastLine(msgs: List<BitchatMessage>?, myNick: String): Pair<String, Long> {
+    val m = msgs?.lastOrNull { it.sender != "system" } ?: return Pair("", 0L)
+    val who = if (m.sender == myNick) "Vous : " else ""
+    return Pair(who + m.content.replace('\n', ' '), m.timestamp.time)
+}
+
+/** Nom donné localement : cherché sous toutes les clés connues de la personne. */
+private fun aliasName(ids: List<String?>, default: String): String {
+    for (id in ids) {
+        if (id == null) continue
+        val n = ReoFenuaContacts.nameFor(id, "")
+        if (n.isNotBlank()) return n
+    }
+    return default
+}
+
+private fun isBlockedAny(ids: List<String?>): Boolean = ids.any { it != null && ReoFenuaBlock.isBlocked(it) }
+
+/** Clé de bruit (identité stable) d'une personne à portée, si on la connaît. */
+private fun noiseHexOf(viewModel: ChatViewModel, peerID: String): String? =
+    try { hexOf(viewModel.getMeshPeerInfo(peerID)?.noisePublicKey)?.lowercase() } catch (_: Exception) { null }
+
+private fun buildRows(
+    viewModel: ChatViewModel,
+    online: List<String>,
+    nicknames: Map<String, String>,
+    chats: Map<String, List<BitchatMessage>>,
+    unread: Set<String>,
+    myNick: String
+): List<HomeRow> {
+    val used = HashSet<String>()
+    val out = ArrayList<HomeRow>()
+    val favs = savedFavorites()
+    val favHex = favs.mapNotNull { hexOf(it.peerNoisePublicKey)?.lowercase() }.toSet()
+    val onlineHex = HashMap<String, String>()
+    for (pid in online) noiseHexOf(viewModel, pid)?.let { onlineHex[it] = pid }
+
+    fun conv(ids: List<String?>): Pair<String?, List<BitchatMessage>?> {
+        for (id in ids) {
+            if (id == null) continue
+            val m = chats[id]
+            if (!m.isNullOrEmpty()) return Pair(id, m)
+        }
+        return Pair(null, null)
+    }
+
+    // 1. Personnes à portée : avec une discussion, ou enregistrées
+    for (pid in online) {
+        val h = onlineHex.entries.firstOrNull { it.value == pid }?.key
+        val ids = listOf(pid, canonOf(pid), h)
+        val (ck, msgs) = conv(ids)
+        val saved = h != null && favHex.contains(h)
+        if (msgs.isNullOrEmpty() && !saved) continue
+        ids.filterNotNull().forEach { used.add(it) }
+        ck?.let { used.add(it) }
+        val (txt, t) = lastLine(msgs, myNick)
+        out.add(
+            HomeRow(
+                key = pid,
+                name = aliasName(ids, nicknames[pid] ?: "?"),
+                online = true,
+                last = if (txt.isEmpty()) "À portée en ce moment" else txt,
+                time = t,
+                unread = ids.any { it != null && unread.contains(it) },
+                saved = saved,
+                ids = ids.filterNotNull()
+            )
+        )
+    }
+    // 2. Proches enregistrés qui ne sont pas autour
+    for (f in favs) {
+        val h = hexOf(f.peerNoisePublicKey)?.lowercase() ?: continue
+        if (used.contains(h) || onlineHex.containsKey(h)) continue
+        val ids = listOf(h, canonOf(h))
+        val (ck, msgs) = conv(ids)
+        ids.filterNotNull().forEach { used.add(it) }
+        ck?.let { used.add(it) }
+        val (txt, t) = lastLine(msgs, myNick)
+        out.add(
+            HomeRow(
+                key = h,
+                name = aliasName(ids, nicknames[h] ?: f.peerNickname),
+                online = false,
+                last = if (txt.isEmpty()) "Pas autour en ce moment" else txt,
+                time = t,
+                unread = ids.any { it != null && unread.contains(it) },
+                saved = true,
+                ids = ids.filterNotNull()
+            )
+        )
+    }
+    // 3. Autres discussions privées
+    for ((k, msgs) in chats) {
+        if (used.contains(k) || msgs.isEmpty()) continue
+        val other = msgs.lastOrNull { it.sender != myNick && it.sender != "system" }
+        val name = other?.sender ?: msgs.last().recipientNickname ?: nicknames[k] ?: continue
+        val (txt, t) = lastLine(msgs, myNick)
+        out.add(
+            HomeRow(
+                key = k,
+                name = ReoFenuaContacts.nameFor(k, name),
+                online = online.contains(k),
+                last = txt,
+                time = t,
+                unread = unread.contains(k),
+                saved = false,
+                ids = listOf(k)
+            )
+        )
+    }
+    return out.sortedWith(
+        compareByDescending<HomeRow> { it.unread }
+            .thenByDescending { it.time }
+            .thenByDescending { it.online }
+    )
+}
+
+/** Couche plein écran posée sur l'écran principal. Retour (Android) depuis une discussion : on revient ici. */
+@Composable
+fun BoxScope.ReoFenuaHomeLayer(viewModel: ChatViewModel) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { ReoFenuaContacts.load(context) }
+    val sheetPeer by viewModel.privateChatSheetPeer.collectAsState()
+    val selPeer by viewModel.selectedPrivateChatPeer.collectAsState()
+    val home = ReoFenuaHome.show.value
+    BackHandler(enabled = !home && sheetPeer == null && selPeer == null) {
+        viewModel.switchToChannel(null)
+        ReoFenuaHome.show.value = true
+    }
+    BackHandler(enabled = home && ReoFenuaHome.search.value) {
+        ReoFenuaHome.search.value = false
+    }
+    QrAddWatcher(viewModel)
+    if (ReoFenuaHome.newGroup.value) NewPublicGroupDialog(viewModel)
+    ReoFenuaHome.menu.value?.let { PersonMenu(viewModel, it) }
+    if (!home) return
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(30f),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (ReoFenuaHome.search.value) HomeSearch(viewModel) else HomeList(viewModel)
+            }
+            if (!ReoFenuaHome.search.value) ReoFenuaBottomBar(viewModel)
+        }
+    }
+}
+
+private fun openPublic(viewModel: ChatViewModel, context: android.content.Context) {
+    // « Autour de moi » = Bluetooth seulement : on quitte un éventuel lieu choisi dans le Radar (Internet)
+    try {
+        com.bitchat.android.geohash.LocationChannelManager.getInstance(context)
+            .select(com.bitchat.android.geohash.ChannelID.Mesh)
+    } catch (_: Exception) { }
+    viewModel.switchToChannel(null)
+    ReoFenuaHome.search.value = false
+    ReoFenuaHome.show.value = false
+}
+
+private fun openPerson(viewModel: ChatViewModel, key: String) {
+    // La discussion s'ouvre par-dessus l'accueil ; en la fermant, on revient à la liste.
+    viewModel.showPrivateChatSheet(key)
+}
+
+private fun openGroup(viewModel: ChatViewModel, channel: String) {
+    viewModel.joinChannel(channel)
+    ReoFenuaHome.search.value = false
+    ReoFenuaHome.show.value = false
+}
+
+@Composable
+private fun AvatarDot(key: String, name: String, size: Dp, online: Boolean?) {
+    Box {
+        ReoFenuaAvatar(key = key, name = name, size = size)
+        if (online != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(15.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .then(
+                        if (online) Modifier.background(HVert)
+                        else Modifier.border(2.5.dp, HGris, CircleShape)
+                    )
+            )
+        }
+    }
+}
+
+/** Bouton « ⋯ » visible au bout d'une ligne : ouvre les options de la personne. */
+@Composable
+private fun OptionsButton(name: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .semantics { contentDescription = "Options pour $name" }
+    ) { Text(text = "⋯", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+}
+
+@Composable
+private fun RoundIcon(text: String, bg: Color, fg: Color, size: Dp) {
+    Box(
+        modifier = Modifier.size(size).clip(CircleShape).background(bg),
+        contentAlignment = Alignment.Center
+    ) { Text(text = text, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = fg) }
+}
+
+@Composable
+private fun HomeList(viewModel: ChatViewModel) {
+    val context = LocalContext.current
+    val connected by viewModel.connectedPeers.collectAsState()
+    val nicknames by viewModel.peerNicknames.collectAsState()
+    val chats by viewModel.privateChats.collectAsState()
+    val unread by viewModel.unreadPrivateMessages.collectAsState()
+    val favTick by viewModel.favoritePeers.collectAsState()
+    val channels by viewModel.joinedChannels.collectAsState()
+    val publicMsgs by viewModel.messages.collectAsState()
+    val myNick by viewModel.nickname.collectAsState()
+    val aliasTick = ReoFenuaContacts.aliases.size
+    val online = connected.filter { it != viewModel.myPeerID }
+    val rows = remember(connected, nicknames, chats, unread, favTick, aliasTick, myNick) {
+        buildRows(viewModel, online, nicknames, chats, unread, myNick)
+    }
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Reo Fenua",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f)
+            )
+            Button(
+                onClick = { ReoFenuaSteps.show.value = true },
+                colors = ButtonDefaults.buttonColors(containerColor = HLagon, contentColor = Color.White),
+                modifier = Modifier.heightIn(min = 48.dp).padding(end = 6.dp)
+            ) { Text(text = "?  Aide", fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+            ReoFenuaModePill()
+        }
+        // Barre de recherche
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(26.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .clickable { ReoFenuaHome.search.value = true }
+        ) {
+            Text(
+                text = "🔍  Rechercher une personne",
+                fontSize = 17.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 13.dp)
+            )
+        }
+        // Bulles : Autour, personnes à portée, Nouveau
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Bubble(label = "Autour", onClick = { openPublic(viewModel, context) }) {
+                RoundIcon("📡", HLagon, Color.White, 60.dp)
+            }
+            for (pid in online) {
+                val n = ReoFenuaContacts.nameFor(pid, nicknames[pid] ?: "?")
+                Bubble(label = reoStripAvatarTag(n), onClick = { openPerson(viewModel, pid) }) {
+                    AvatarDot(key = pid, name = n, size = 60.dp, online = true)
+                }
+            }
+            Bubble(label = "Chercher", onClick = { ReoFenuaHome.search.value = true }) {
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) { Text(text = "+", fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+
+        // Discussion publique
+        val pub = publicMsgs.lastOrNull { it.sender != "system" }
+        ListRow(
+            onClick = { openPublic(viewModel, context) },
+            leading = { RoundIcon("📡", HLagon, Color.White, 54.dp) },
+            title = "Autour de moi (public)",
+            subtitle = if (pub != null) pub.sender + " : " + pub.content.replace('\n', ' ')
+            else if (online.isEmpty()) "Personne autour pour l'instant"
+            else (if (online.size == 1) "1 personne autour" else online.size.toString() + " personnes autour") + " · dites bonjour",
+            unread = false
+        )
+        // Groupes publics rejoints
+        for (ch in channels.sorted()) {
+            ListRow(
+                onClick = { openGroup(viewModel, ch) },
+                leading = { RoundIcon("#", HSable, HOcean, 54.dp) },
+                title = ch.removePrefix("#"),
+                subtitle = "Groupe public · lisible par les personnes autour",
+                unread = false
+            )
+        }
+        // Proches et discussions privées
+        for (r in rows) {
+            ListRow(
+                onClick = { openPerson(viewModel, r.key) },
+                leading = { AvatarDot(key = r.key, name = r.name, size = 54.dp, online = r.online) },
+                title = reoStripAvatarTag(r.name),
+                subtitle = if (isBlockedAny(r.ids)) "Bloqué(e)"
+                else if (r.online && !r.last.startsWith("À portée")) "À portée · " + r.last
+                else r.last,
+                unread = r.unread,
+                trailing = { OptionsButton(reoStripAvatarTag(r.name)) { ReoFenuaHome.menu.value = PersonRef(r.key, r.name, r.online, r.saved, r.ids) } }
+            )
+        }
+        if (rows.isEmpty()) {
+            Text(
+                text = "Vos proches apparaîtront ici. Touchez « Rechercher une personne » pour voir qui est autour de vous et l'enregistrer.",
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun Bubble(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        content()
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun ListRow(
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit,
+    title: String,
+    subtitle: String,
+    unread: Boolean,
+    trailing: (@Composable () -> Unit)? = null,
+    onLeadingClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (onLeadingClick != null) {
+            Box(modifier = Modifier.clip(CircleShape).clickable { onLeadingClick() }) { leading() }
+        } else {
+            leading()
+        }
+        Column(modifier = Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
+            Text(
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 15.sp,
+                    fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (unread) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (unread) {
+            Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(HRouge))
+        }
+        trailing?.invoke()
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 18.dp, top = 16.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun HomeSearch(viewModel: ChatViewModel) {
+    val connected by viewModel.connectedPeers.collectAsState()
+    val nicknames by viewModel.peerNicknames.collectAsState()
+    val favTick by viewModel.favoritePeers.collectAsState()
+    val aliasTick = ReoFenuaContacts.aliases.size
+    var query by remember { mutableStateOf("") }
+    val q = query.trim().lowercase()
+    val online = connected.filter { it != viewModel.myPeerID }
+    val favs = remember(favTick) { savedFavorites() }
+    val favHex = favs.mapNotNull { hexOf(it.peerNoisePublicKey)?.lowercase() }.toSet()
+    val onlineHex = remember(connected, favTick) { online.associateWith { noiseHexOf(viewModel, it) } }
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = { ReoFenuaHome.search.value = false },
+                modifier = Modifier.heightIn(min = 52.dp)
+            ) { Text(text = "← Retour", fontSize = 17.sp) }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it.take(30) },
+                placeholder = { Text("Prénom…") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        SectionLabel("Autour de moi en ce moment")
+        val here = online.filter {
+            q.isEmpty() || ReoFenuaContacts.nameFor(it, nicknames[it] ?: "").lowercase().contains(q)
+        }
+        if (here.isEmpty()) {
+            Text(
+                text = if (online.isEmpty()) "Personne autour pour l'instant. Seules les personnes qui ont Reo Fenua ouvert, à portée de Bluetooth, apparaissent ici."
+                else "Personne de ce nom autour de vous.",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp)
+            )
+        }
+        for (pid in here) {
+            val n = ReoFenuaContacts.nameFor(pid, nicknames[pid] ?: "?")
+            val saved = onlineHex[pid]?.let { favHex.contains(it) } == true
+            ListRow(
+                onClick = { openPerson(viewModel, pid) },
+                leading = { AvatarDot(key = pid, name = n, size = 52.dp, online = true) },
+                title = reoStripAvatarTag(n),
+                subtitle = if (ReoFenuaBlock.isBlocked(pid)) "Bloqué(e)" else if (saved) "À portée · dans mes proches" else "À portée · pas encore enregistré",
+                unread = false,
+                trailing = {
+                    if (!saved) {
+                        Button(
+                            onClick = { ReoFenuaHome.menu.value = PersonRef(pid, n, true, false) },
+                            colors = ButtonDefaults.buttonColors(containerColor = HLagon, contentColor = Color.White),
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) { Text(text = "+ Ajouter", fontSize = 16.sp) }
+                    } else {
+                        OptionsButton(reoStripAvatarTag(n)) { ReoFenuaHome.menu.value = PersonRef(pid, n, true, true) }
+                    }
+                }
+            )
+        }
+
+        val away = favs.filter { f ->
+            val h = hexOf(f.peerNoisePublicKey)?.lowercase()
+            h != null && !onlineHex.values.contains(h) &&
+                (q.isEmpty() || ReoFenuaContacts.nameFor(h, f.peerNickname).lowercase().contains(q))
+        }
+        if (away.isNotEmpty()) {
+            SectionLabel("Mes proches enregistrés")
+            for (f in away) {
+                val h = hexOf(f.peerNoisePublicKey)!!.lowercase()
+                val n = ReoFenuaContacts.nameFor(h, nicknames[h] ?: f.peerNickname)
+                ListRow(
+                    onClick = { openPerson(viewModel, h) },
+                    leading = { AvatarDot(key = h, name = n, size = 52.dp, online = false) },
+                    title = reoStripAvatarTag(n),
+                    subtitle = if (ReoFenuaBlock.isBlocked(h)) "Bloqué(e)" else "Pas autour en ce moment",
+                    unread = false,
+                    trailing = { OptionsButton(reoStripAvatarTag(n)) { ReoFenuaHome.menu.value = PersonRef(h, n, false, true) } }
+                )
+            }
+        }
+
+        SectionLabel("Ajouter quelqu'un en face de moi (facultatif)")
+        ListRow(
+            onClick = {
+                ReoFenuaHome.qrAddSince.value = System.currentTimeMillis()
+                viewModel.showVerificationSheet()
+            },
+            leading = { RoundIcon("▦", HSable, HOcean, 52.dp) },
+            title = "Ajouter par QR code",
+            subtitle = "Chacun scanne le code de l'autre : ajouté et vérifié",
+            unread = false
+        )
+
+        SectionLabel("Créer")
+        ListRow(
+            onClick = { ReoFenuaHome.newGroup.value = true },
+            leading = { RoundIcon("#", HSable, HOcean, 52.dp) },
+            title = "Nouveau groupe public",
+            subtitle = "Un nom à partager avec les personnes autour",
+            unread = false
+        )
+        ListRow(
+            onClick = { ReoFenuaNav.showProches.value = true },
+            leading = { RoundIcon("✎", HSable, HOcean, 52.dp) },
+            title = "Gérer mes proches",
+            subtitle = "Renommer, photo, bloquer",
+            unread = false
+        )
+        Spacer(Modifier.height(16.dp))
+        // relire les noms quand un proche est renommé
+        if (aliasTick < 0) Text("")
+    }
+}
+
+@Composable
+private fun NewPublicGroupDialog(viewModel: ChatViewModel) {
+    var name by remember { mutableStateOf("") }
+    val close = { ReoFenuaHome.newGroup.value = false }
+    Dialog(onDismissRequest = close) {
+        Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge) {
+            Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text = "Nouveau groupe public", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = "Choisissez un nom simple, par exemple « quartier-tipaerui » ou « famille-teva ». " +
+                        "Les personnes autour qui entrent le même nom rejoignent le groupe.",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { v ->
+                        name = v.lowercase().replace(' ', '-')
+                            .filter { it in 'a'..'z' || it in '0'..'9' || it == '-' }
+                            .take(24)
+                    },
+                    label = { Text("Nom du groupe") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "⚠ Groupe public : il n'est pas chiffré. Toute personne autour qui connaît ce nom peut lire et écrire.",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Button(
+                    onClick = {
+                        val n = name.trim('-')
+                        if (n.isNotEmpty()) {
+                            close()
+                            openGroup(viewModel, "#$n")
+                        }
+                    },
+                    enabled = name.trim('-').isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = HLagon, contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                ) { Text(text = "Créer et ouvrir", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                    Text(text = "Annuler", fontSize = 17.sp)
+                }
+            }
+        }
+    }
+}
+
+/** Menu d'une personne : écrire, l'enregistrer dans mes proches, la bloquer ou la débloquer. */
+@Composable
+private fun PersonMenu(viewModel: ChatViewModel, p: PersonRef) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { ReoFenuaBlock.load(context) }
+    val close = { ReoFenuaHome.menu.value = null }
+    var confirmBlock by remember { mutableStateOf(false) }
+    var confirmAdd by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(p.saved) }
+    var info by remember { mutableStateOf("") }
+    val blocked = isBlockedAny(p.ids)
+    val shown = reoStripAvatarTag(p.name)
+    val danger = MaterialTheme.colorScheme.error
+    Dialog(onDismissRequest = close) {
+        Surface(color = MaterialTheme.colorScheme.background, shape = MaterialTheme.shapes.extraLarge) {
+            Column(
+                modifier = Modifier.padding(22.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                AvatarDot(key = p.key, name = p.name, size = 84.dp, online = p.online)
+                Text(text = shown, fontSize = 23.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+                Text(
+                    text = if (blocked) "🚫 Bloqué(e)" else if (p.online) "À portée en ce moment" else "Pas autour en ce moment",
+                    fontSize = 16.sp,
+                    color = if (blocked) danger else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (info.isNotEmpty()) {
+                    Text(text = info, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                }
+                if (confirmBlock) {
+                    Text(
+                        text = "Bloquer $shown ? Vous ne verrez plus ses messages. Vous pourrez débloquer ici.",
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Button(
+                        onClick = {
+                            // Jamais de blocage « par le nom » ici : il pourrait viser quelqu'un d'autre.
+                            val ok = try { viewModel.privateChatManager.blockPeer(p.key, viewModel.meshServiceFacade) } catch (_: Exception) { false }
+                            if (ok) ReoFenuaBlock.markBlocked(context, p.key)
+                            confirmBlock = false
+                            info = if (ok) "Bloqué(e)." else "Impossible pour l'instant : réessayez quand la personne est à portée."
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = danger, contentColor = MaterialTheme.colorScheme.onError),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    ) { Text(text = "Oui, bloquer", fontSize = 18.sp) }
+                    OutlinedButton(onClick = { confirmBlock = false }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                        Text(text = "Non", fontSize = 17.sp)
+                    }
+                } else if (confirmAdd) {
+                    Text(
+                        text = "Ajouter $shown à vos proches ? Son téléphone recevra un petit avis : elle ou il saura que vous l'avez ajouté(e).",
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Button(
+                        onClick = {
+                            if (!saved) viewModel.toggleFavorite(p.key)
+                            saved = true
+                            confirmAdd = false
+                            info = "Ajouté(e) à mes proches."
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = HLagon, contentColor = Color.White),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    ) { Text(text = "Oui, ajouter", fontSize = 18.sp) }
+                    OutlinedButton(onClick = { confirmAdd = false }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                        Text(text = "Non", fontSize = 17.sp)
+                    }
+                } else {
+                    if (!blocked) {
+                        Button(
+                            onClick = { close(); openPerson(viewModel, p.key) },
+                            colors = ButtonDefaults.buttonColors(containerColor = HLagon, contentColor = Color.White),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                        ) { Text(text = "💬  Écrire", fontSize = 18.sp) }
+                    }
+                    if (!blocked && !saved && p.online) {
+                        OutlinedButton(
+                            onClick = { confirmAdd = true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) { Text(text = "⭐  Ajouter à mes proches", fontSize = 17.sp) }
+                    }
+                    if (saved) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.toggleFavorite(p.key)
+                                saved = false
+                                info = "Retiré(e) de mes proches."
+                            },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) { Text(text = "Retirer de mes proches", fontSize = 17.sp) }
+                    }
+                    if (blocked) {
+                        OutlinedButton(
+                            onClick = {
+                                for (id in p.ids) if (ReoFenuaBlock.isBlocked(id)) ReoFenuaBlock.unblock(context, viewModel, id, p.name)
+                                info = "Débloqué(e)."
+                            },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) { Text(text = "Débloquer", fontSize = 17.sp) }
+                    } else if (p.online) {
+                        OutlinedButton(
+                            onClick = { confirmBlock = true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) { Text(text = "🚫  Bloquer", fontSize = 17.sp, color = danger) }
+                    } else {
+                        Text(
+                            text = "Pour bloquer cette personne, attendez qu'elle soit à portée.",
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(text = "Fermer", fontSize = 17.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+/**
+ * Après « Ajouter par QR code » : quand la vérification par QR réussit (dans les 10 minutes),
+ * la personne vérifiée est aussi ajoutée à mes proches. Rien d'autre n'est gardé.
+ */
+@Composable
+private fun QrAddWatcher(viewModel: ChatViewModel) {
+    val context = LocalContext.current
+    val verified by viewModel.verifiedFingerprints.collectAsState()
+    var known by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(verified) {
+        val prev = known
+        known = verified
+        if (prev == null) return@LaunchedEffect
+        val since = ReoFenuaHome.qrAddSince.value
+        if (since == 0L || System.currentTimeMillis() - since > 10 * 60_000L) return@LaunchedEffect
+        val added = verified - prev
+        if (added.isEmpty()) return@LaunchedEffect
+        ReoFenuaHome.qrAddSince.value = 0L
+        val favHex = savedFavorites().mapNotNull { hexOf(it.peerNoisePublicKey)?.lowercase() }.toSet()
+        for (pid in viewModel.connectedPeers.value) {
+            if (pid == viewModel.myPeerID) continue
+            if (!viewModel.isPeerVerified(pid, added)) continue
+            val h = noiseHexOf(viewModel, pid)
+            if (h == null || !favHex.contains(h)) viewModel.toggleFavorite(pid)
+            val name = reoStripAvatarTag(viewModel.peerNicknames.value[pid] ?: "La personne")
+            android.widget.Toast.makeText(context, "$name est ajouté(e) à vos proches et vérifié(e).", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+}
+'''
 EMOJI_PNG = {"reo_emoji_sourire": "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", "reo_emoji_rire": "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", "reo_emoji_clin": "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", "reo_emoji_amour": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXoo6LPz6ni6OvgUGX3rrrs5dz5wHCWdS65q5DBIDjgKkP6nyD/r8vh6Oxugjt+qGW/GzO+R0KosEzgKT3dRlnecoH1r2/zrLrm5ub+y0zcLUMAAABmRQDz9vjyqrjn6u13sVXoWG3YNkX/y0z3t0juhpf/zEvwmKf/zEzsdojpZXj/zEz/y0zmWkb/y0zd5Oj0mUn3qErv6NfPRE53VAjWpzjpZ0bsdkdckTttmEx2qFHhREbvh0j/00b9qDD/ykvJnDGBXA2Qsm7v3OHHqpWMZhOyqIWjxJPR2Mjzqrrssrbtxs6xyanW5NX//1WZchq4W0mvhSTqbYDu8vWDcj2Jq3D0qrntuMPyyIvt1dqSekeDoVKjex7gPUTisj7qytH41Jjq2K/s6+11i0WXhkmYw4OndlG/kyynqXu10qrXrKP0kg3zqrn/v0Dxt8T/zDPh6u///wD////2+P16eTyGnFOQmWaVtoewZkq4iXK0m36ltGyiv5TcLELdLUPWV2ZkEtWzAAAAgHRSTlPy+Jr0JOTt////KP8LRP//////GY///2sK/v8A//7+/////s///07+Zv//Nq7/iv/////////////////7Dv8O////////////sPz8//8D/////8z//0r///3//////8///9b///////////+VBNoFNAEBJ////////////1C6/y7whvYAAAbLSURBVHja7ZlnW9tIEIBFS8/1JgmtrOIi2xgb94aNjcEBAwEChBZKeu/J5ZJc/vrNriQj21pJxvDhnrv5AIidmXdndnZ29YjhrbIuigLIJP5xAyHkl6Sk5tf88Gf+YwvGplT1CA8u5fPwP6RJScmvaUGEXhim5KfVJWN9eHUs4HGieQz2a9KaPxxGRHIbugOMb7Y2cnMIBSXwLvnJ8NiwbkqUegGvQ4HRG4g5GMYaU0TpAKywc8NDPlczYxNFcT6fm8UADSFJwsMv1oW26dTQ82cI3dg8AbzZZFh2AdTIHG5PT08JwvqBPnHIEnj5kM/l5sn8RULZyOX+MsbDUhDNXsJwYWp6+lAQF1n2AhnZNAHXINssqyJUJ2rq06u3J0VhiTEJkOFCwVeoCfBfYcgE5JE5jtAcMRQOrz5VtxG6gGcLRowJ+B20GLaE/LqaHoH42AdJmNV9zPl8hXc7TZjj0REeE+9dfFeoPWmP1/TUQQS38SOb8Ptx4kwAKRfm8loQZ7e9BuK8D6Rm+L8ncxynslgOx8Z+gwd5F48TQs03RExhAnU8WeZbMkxW5tmoCQhK4RE5LBpFIOqh3Mce3n96VPMV/uSwTLCGFPGT/B6PP7i0AeHlv0BOsSUGQG39YNTWMwLYxBGEpcvwz8XtOgE0SanfLRRg5skHN2VOl4TuP64/yQ92d4F8c2fnu1yu0GqSAoNaCWoSl9S0NSgOdI1UEc5RUOJGJCm8UCeL2Gp9+f5WkuuWjA7I9Awkb+U+LhHLIVJZSVmS1lB9C41aIhiRgkGIgUQwn78lc71StGSoBzFPqhjPNSxBlrbI02h7DcA7Lni8F0ShZeseRAfYjyXxEs7h+Wtbi2iBbJkDvAavXuCm4Df35KOWOEdxb9SRShmU6kP5D+ABJ0FYJJW7/opnBGHb2DEa7Mm5fP7ujxxVyCon6OPJu+BHOOl6Y8N/AODxgkEI6ltKpjuIW4rIVm5CB7G01aXjYQZW1Df7ZLamM8B/khsE4Hv0ZJtkZ+qItEWBESf1HfUZ3M/WfLtO/l1ThAm++0vgGdqGShoDpEicJF1BbNZ8vh3Zydp5kQ1CYf5xE3e0p7ilCQIzvIh75E+fm4LYZL5x3KAATv5EHF9QDwUDYLQfUagzsoutvg9ctDTB9AhLsM5cb7e3SSHoEoDR7SactZDpURS20HXmbbumRNENkNUBWWetBTJ14rHOvMEAOKkWSESaCyDe0U1pEsa+0DaZ8i888+YY/tpiyHlcdAGY54GLGieFf2UQ9o+uQC96G9RkOSnLYSbsbQlcF0EvCD9UzQg5cL5yHiVuAkqe1GUp+VW/tvztEWD6d9sJbfnbuBddkT2pZ9oATzmCEH42AMveQk6cAOKeDErLBiDkaUZF1iJFTxEHDEDUU8wlK8BDzFBzUR1Q8ZTVfbZDZM5LTZcJIES5i1Bq1FsIekWECEAxTGTPK+C6CrKRTwUDKqZJYt9bCbkXUrGtXQZA4MQo49ZHrZLxsmECAIhZjBJFjwnCsu82fZAYAJQOq6y3BNGT1BmrwjPlLjM1KztvAafJyFm1S6fMRHrsehBZliIT3e57VSJMyDb6zL7NMeBIKGbjdhohJkaxTZQmZDf/JkHOlFSKQoyJOpgn4tlMlnWUTKYUTziMRxmFPVdRzh/AnrP8D/gvAP79+yB6voAotdmdkcTs2/XZScjmwDGkOjM+PrOyWr3jZH+nurqC9ao0hUjPkWlKerwtqcbqw3S6o+Or6fTD1UbqRCdNcVPuPvTb0hjvlVRqptGYSaVshlYoRdR1bbHIeH+Soqxx58VrAMC4vRd88SqfJ6CCL7/2Wy3Vn/8Z+21mub53y0p/gD37XUAA9jmq9gdIUzJkvkINvAi0DBGAfR3t9eN/lVJDxmus7V5T+wHYXuwU8zWWssx7gwYQan9ioWyF1GA1yi6ffMOxD+HOQAnSAzAAZcWtozqJfUNXXlo/c1FOherptwAb6fyOFj01IU3ro52Aivu5Y9+maW8e5e4vgZSuzaoNJ/8N2lEZ6P3USL1eVKnlmqIexTGbb5mv6Vewh7YI+knPRl/bfSyNONweqj3dey/toF62/xobcbzhpPH9xLhlXEw7qkZon3sDZ3PZClC/J58NocN/F4A/g4tkiHcCDB5DgHcGuKy0q0R4NwBfGeCVRCnz7gB++dSvDKFl3gvg1AsRsfNlC+ArpwgiVuG9A2Ct+1wJJUJxRAP0uSVCVDd0AP8y4DEKJfSSPw0Ar7aHl9xowNGFMwCW25kRDVRcHLgBQJ5HYra5UmKR5+7WHgAkkEggFlUUAoJf0VAgUvFm+Q8uRBooUcY7dgAAAABJRU5ErkJggg==", "reo_emoji_bisou": "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", "reo_emoji_cool": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX+y0wAAAApLjNmRQD09/n/y0z/zEv/y0z/zEzm6+3/zUt1ZzvT3OLNp0YzNzVcVTjXqDhKSDb/y03/y0yMdz62lkP/00npuUXv6NLGmTD9qjLt3Ku0iSfa4uaMZxOkiUHQ19zhsT1kWjmbdBqCXQ7h6Ox5VgqXnaH/v0D14LP//1Xy9fclKzC3tqz1kxD702z22Zj8///09/l8gYWXf0CheR6mfSDAnETFys37wm/1y43//wD2+vopLjJESk9MUVWAbj2agkCCh4uboaW+kiynrLDbsUj/zDPj6O3z+Pn09/keLS0qKiozOyo/QDVJSSxJRTZFQjZcYWVgZmpuc3V4foONlJm7rYK7v8HBw73f///6nyH4vmvx3KP54J7h5+zl6+/r7/P28d/x9fgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMW51PAAAAgHRSTlP+AP7//tBOrmv/Mf////////8Pjf/9EP//////////////////lv//BP8Dzir///7/Dk//////9v///wE4if///////////wUzb4sREh7/I7jM//////////8I//+p/1+kxP+2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJQW52wAAAT6SURBVHjazZpnd6M4FIZlgwCDwabbcbfjOGUym55Mkul9dme29777///DCtFtCQSYc/Z+yHFs8T7cqyvpIgEabCYLpggh8AxCKJqCbLBdCFjEJREQDEpydcAhRTw0MReSDRAy1QOGUBZwKEDAZFAqBWCVxyY5RQGyCAoZlAsBHBMUNtPL29MPR0f3uYA7CZQyoXHPe3aWAzg0y+mDz37n+dYUEU4zAYZYUn4w6PGt9roLGwAZlhE/+ONgMBjwPNbnj97RAXIZ+R6W7cWA5Z+nFIBQJjh8YChCLfzh7+XyHRlQSh+Eujw/8j/8tVwufyEByumDMDJ8TOL5f083AXLJ9PyHb49CAh/b2TqgrD44QS74Ppz8dttrjaajdttDnqUBBiwLAOi+R23059EOsp7vBRoRR2mAWFofoBGGBKftnZ2HD3cOohh9SAEkUAHgDWLE2Pk1BbhPAhxQCeAPNT9Eof77VCeLVQAnoejto9vetJXUDwECqAQIk3Tk9y7f6x0MhCTg4/XEUjqdjq43I9P0uaI8syb2G7ryG9W+sBTlOAD4uYry6efj4x/tLyPA42aO6R1loqal1YnSie5mGiZm6Mdo9YOGvn/sAz5vspneiUxP/zL19VvBQEb/vnyCf3iAAQ+aVe0nNM68oTu9CSN13kwAvqgMOPdjM335OgQ8TQIaX1UFaN/dtFo3r1er1dQHtPzvvw46WbxobsOefPv9+QucqPwL/IUl+gAD5YTGpjG3VPVayXRmhQjH+NM1AA4GeLOQyqRv+ylqZ8fr6Tf4dr28ljAAT9MTBn0lHAQKQ+PnuKD0AIZ/EcM1kxBgMzR2cUsHAYJpSM+/JhrMLsOoDKtJ0DBZ3dbiiUJjDaeJAMFKmd8J8xigsIYTNoARzl6511gx4DlzOB0gM7udmE9V5nDKIFqLO3kXJWfrvLvpRM9WIHoYsFhHAUsnROE0gcjqtp0E2KzhFAFkdFtLr2isjWECYLHmUJHGyXIxM0aamwa4GmPCJU1n7YG8XuhQihCVMYVyE0mllTkKwywRG3XgPKMXUgrz/We0nmcVgTbhtnSb1lqdM7TeeOxQbWuu65qme6Xjha26mWWpOrFQ0eml1CfU3pq4G/IQ1GoQiPUCRGDWCzCBVC9AAnK9ADlaMmsyI1r0a0oiVFXUmkZmXHjVY0JcOtbUBVHxu27dWTGlWZfcBWH5vtGe44ZF9K84jnRHfvlO2kXochy3y+xEfw81J7ngBI9QhJ8W6BJu4bLIu2PcljQRBc9opDxyOWyLbq78JW64R84hH3AHKUHCV/az5F+Ng2akcML9cK+COBRCAsddUTqju4iaEB2Vos2QfWKm9rnYLtf9mPUXe/HPZC/3490W8pydJKCkGl8Oh/0usv5wnPqFoi8ltnPILqwRqEZOBOgkN6SkrAzMtl1KLssNpi21YZ7+kDqPpgHUTcHZXpb8mDpOnPW9a/raTHdit5sxT29sjmcsPK92ifL9rIVmE5C5tTxbz8zxMGueEu9IJyB59YXbHV4txuOFNxpymjrkI5atVTAy7ZBI2NZCTD2FErauv5VDItIURD3mErZ7/6SDuu31L+WosQoBGizHvU7pYlI6ZDxPFrYUHvqBdZkTWdModORe9MGn4JE7srdSoZcG3v4PX3uo/8UNP2ezIyUKRvWXZxyKH9CU97fzdg5++0dKvf4jMb/+8x/Z4mEEWaitmwAAAABJRU5ErkJggg==", "reo_emoji_tranquille": "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", "reo_emoji_fiu": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX+y00AAABmRQD09vfXqTj/y0z/y0v/zEv/y0z/zEzt3Kz/y0zn6+zb4uf/yU7/1Enz6c3xuEf702752or//wDU3eL247H9piuvhSSCXQ7z9vWGYRD2lRT4wnP28NxzUQfisj7/v0D+0F3//1X////2+fyfeB2geB2ofyG+kizP2d//zDPyy5Dt3Kji6fDh5uPr7u71+PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACeH3x0AAAAgHRSTlP+AP/+/89RMa1p/Y7//xAP///9/wH//////9n///////8E/wMNLP//////Bf/SI2XAlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHrRZ6UAAAMuSURBVHja7Zppk+IgEIZbCSFAQi41c+hcO7P3+f//3EISHaOQQY7d2qp9v8SySD8BmqsbWFhJkJRnGIMSxhnnlNi9uACLMoQPlk+EeUr8AYRmMCNMSx9Amc5aH5SlwhHwhWKwEk5dACUFe80gTACC4SLhdHUJQHC4WJmwB6TgpNQS8I6Do7LSBiAwOAuTtwHEyXKDENqoH2Tx/PI8B3Bs/juktGGM3cjnzYsRQMGxAkWuCGyDUF4U6JcJ4Pj90KKir0Il7SvSjQHgal8B+hqg/VMPIM7ew9BYhXywr6+Bu/2WVeOnr4d6/PyuAazc/V86z2h7bCj2QwPg7uOr6q2uWV3vBmdi384Bqa99hOpu233tCRWjp4DS3f5mtF91221X58Vn1d+NOAFk7gC0167rOkXLJaHKpgB3D5KjeOjZfJ2zHRtHg6wCOQaUHjPok7RXFOuJm8pni48BFDzUolcVh1/tuP70AAFeatQUV00BlVwcVgcABV/1Q61vmlyOalQ1hyVUAR6xN6AZAYUcAozt17fVCPCvwL4ncgVoJrsA8BsDJ+NNuefxJmAACAijOzUg2slfogfQQICnDbprz3ZKEoAhlJqzjZICCIgoIQFpTEAqATwmgEsAjgnACyghqlZA4gII0LiAFHhcAAftRJScq56WqDVFtGcS0DjR1VKn22Pz19oiV3aAh+XyrdevDEUezv1U1z6Gtz+8FnlvKJJYAWrD25/erkFt1/OJroXvJw388V5T5DqB/3KY7QD/44AMstiA6JNd9Ok6+oIjIPKSGX3Rj79tibrxohIQdd9Sht38gnbzu6Axt6YKUF608Fy00JSzR6h6aa3a2EI9wOBHiT0gMYeCZ46x3oDDMdbUzbe29m9nYtmzoYTEUmCuQIhgyHww3j+cY57njgNSESYkMg2p8QizxAQgwp+Qw4U1Z9Mt4BvZn2+gQKFlcwMFCo6bPChceH8m3xUmQXG6EBuTRDS4/UBJIrP9UGkuc74xUKJO5z9/K9UYP1kaP93rmrAu46bcycW3EqiH81veq7C99gC8dL0ZYndxw+vqiUhjXj35E5dnNNd/VLPYX//5DT68JW8O6TKlAAAAAElFTkSuQmCC", "reo_emoji_dodo": "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", "reo_emoji_timide": "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", "reo_emoji_miam": "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", "reo_emoji_fete": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXjV1fv1JzjlJri3t5SYlarqm91sFHgxWVolqThK0TpX1jrX2t2sVS8kSuEvN3xVWj2lxbojFg6h8JDu/ppruGjex6Wta+KyPuXyOHeM0T/0E09grQ3kMc8iMQA//92slV2sVTqbYAqbqIA/wBdUiVepNx9wPGAs02mzc3bJDfgOE//QID9u0rzil/+y0wAAADdLkM7iMLpWG1mRQD09viHyPjkpy1Uq+13sVQiZpn0uUfr6+7b4+jstTr/y0zdNEj/y0z/y0z/zEvcLUPjRVX+zEzWpzj0lVJ3VAiNZxPhO1DlqbX/zEuZchn4p1BUmc3/zEtzt+nrZXFUrO5Uq+3GmjD/1kmziCbvdWTt1Nf//wBCiLpSrPB2sVSJo5LdLELcLUPfm6fsd0rndIVTq/dUq+2BXQ3cLUPcLUPOumrqWG3osrtFeJRcpNpTrO5Uq+3mTGHxiU/tydAydahpmKZnqdd3tFN3sVSkrIPeLELovMU2jMg5h8M6h8I6h8JAjMcbUAgJAAAAgHRSTlP2//////8n/f8ZolfN//8g//rPCP///yLspif/GmkBUYD//wH/iv8KVg5kBHyk/gD+/v7///7//v3//////67/js5Nkv9t//7/////MP///xH//2iy/wz///8B/Cau/05u////DM3/tcv/lf///0qL//f/////GGj/L/8KT46r/47IYMUAAAb9SURBVHjarZr3Q9paFMcv4Kq2tX3d7et7r2/PJIaIGFZAiSDTAYjSQXEWbatd1q5//d2RcZPcQCCcHxwhnE/OOd9zMm7ApXuHhwdLS8+efvyL92e7r/YWNjdu2LaCv8WUoNsB4gzr/+UCtr2WDfBMXBZsdrD09NLA/lsLmu3tWgFLorgqMOxwQMymDlh4aQO8FkXB1VDSvGH2DMArG2BZdCbJHs296el/FSWJTFGymWJV+/aM6cjwv7DpBFB1drdl8HyFM0zJQMis+IIRwYYNsCr2D8GAcJQlszOiSdgwALsMgKcQoAHOYisiRdhkBgABKQR47Q2wYgVsiRThBiFs/GAHCGgvtlR7Zgga/qY4va232qvNjZZdXTpA9AIoW/3L5Jvi9WIP+ULAa2sIqWDXhfacc5aAEJLFXoBlSwidmCRJHS8JIiWAtgVLk+kBWCW7YamCjiTFYlKModuUzDFKsLWibVbq/QAwBBBsh6Q4CiHo9F+2+5e3TultaXaawDMhRfwHg8FCuyBJcehfaoI+CmUZnaaJx+8NAJZRIYb9FkgAUrMNrL13ynEDESai0R9pwLpELEYCkC7a7VQvAblY1gB8iEajOAgEgDLqaI4lKYR/di/OCqmB/VMx/BRF9uEXHjzFgHUpphHiJBCJrrRn/ybhMQZEH08gAJJRE6kTWSAQgrB4KARJWhAD+Oe4+wRwOaoREADJCOkf1XcyEokEcKFRSMsD++fS5GSk+Y++Bx8FXOVHF9BpPBSPXLsWCUh6yVNe9UOfJjQRYZvgdUCn0D2DiJhMAwpD+CdS0gAfeAKA4269cIFrEIApamr+z1Ke+sthdaJSWAAk00sClpFY0GUa0AXVTQmpYfyjJGGVXv5DBxAZEZXG8I9Yt9AGQ/pHWsUqxcMC8ASwTvlHzXDWDqac882rkupIpdqoQACo00dml+Hfsfbw/mGdSYENgIAjiMeh/1BMCwQsy9zwRgpMAIdERmd4PoQKTR3gxz8XvfzeAkDTqBuTmmeFQpekqOnHPTcJO8wC0E9q4nonSPQa8AUYn8yYgAMagKwDW86ff31gmABBtJjM+be6AVhyAEbh3zi5Af6eQGSk23NuJJY0ANOCNo2IeZ8Ocq2Uz4XDuXypoTI+3tYB+AJldeD01PbDlOWuOHYo6oBTgQwLrFKv7hthh91iFwFUVwSjyl7Tk9gPMyxvm3gaIEMAsAieh4MaZpttNw2QLQukCN6ra3jcv3VFVdVGXquDbTdy9geKjK+q3UazrNYajZoqMwANY6PcgGoK15hVBklu1dV9Lc/MMN5asu1aUtmtBtKcW+prOUuGTY9yKZxTvfYyBLhU0q6U3KC9rBCAZ6HfGimgRB35fh4lPSePEmD410unqsOOO9ArPyXZ/zwF7p2aU/0NbPcU7bNGy9CAtMso8Ow/4cjj0fiTt1PnR+59gDvVY/oT8GrctunJHLGd78ksYsyffHhf9e4/YjmWyak5wz7jaeonzdi/JYKjnTnKvqDzgR+Aw//4nNU+86DoNwB6w/mc3T6BbZ8BJBjlpUMAfNIfgPp3qnLy7uSbFfAF8INVWZatGaICeDePbe2EBnwHeFyEsocEQLuSoy+BrAHcnddtjSYAnkettlV2kWDE2h+WJrd8HJifZxFgBLyCnh9uuQGoIGr6EFcZABRA5c3PO2tWwlcIuI+fH8r9Cbnw2PGDuQfHx8dPzo/sYwK6fbeIrIIIFR3wEAJgjtbho0n3TtXYifAxndydt1Pj49d1+iT0urNoEr4ZfQABGfyEtW+vqmNOmUMMiSZgAhaRnE6MTkYT77THhamZpBoLgA0e81WUFw3wxqgCmkUI0OvKWjZCkN0A33TxaIDFm/AfLKFPBDBLrt3L/UIIuwBOdHnqIVRIEb5+4gnghfaE2D0EAii5hHDTaIA3ZhGgf3LC0TPkWmZT7jKUKQuwNm8lkBp8/UG7w+Fn+tyeUTqCTfbr2Bg65bIjgI4rOxUEPPli3ATqGXItM9WwiVIuV0oYp3YNVJl32O8PzRvxf8w72LKXoey8hji/fdUO+M18OG5myK3MfQB6Kwdv376qge7eoZ6+89PQM5h+MfNfWeZ8AAzQn3fuWB7v87Oz2p8KNwqAfSkEmH9uJ0cAcCy1UAC+nu7daJ6vR90AfDXtEsHAT4lcAC4EefjjtwP4anIEj4icALhGqK/214cnsJfSgLFSq63Fbw97NeyyGAgBu7Z12mJ6mBuyKu8KeGlfi68qI0qPBthwrsUPGIRS5XsBWoy3CQapRLrXai8usrbeb11rrme9RZHMbPP9AK1N5/sWKIpMf8kqxX7vW5BG2221dlmf9g5D6XPwrE5mMDIKC5LMFuue3hgBnva6n1GSacJJp5PZTNX7Oy//A13F/CCKWdiFAAAAAElFTkSuQmCC", "reo_emoji_pense": "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", "reo_emoji_tiare": "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", "reo_emoji_hei": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXl4ueaoGjr0azun5qwzKbaXmvonFvl5uWntIv0qq7g5OlbjznDJDX/0Vd3slR7pWOAgACSrWGSwXnLK0LdcYT/y0wA/wC+GTG/u6O0r4WA/wDpnjHprqb4tpT1ucb9xGX+zVn64Jzu1t1VqgBAgEBmzDOHsmKzr4OlwZ3/scT1uMbK478AAADz9vjzqrhckTrm6u3pWW53sVVpmUntdond5Onxl6juh5j+///w9Pb+yk7qZnrtytPk6e7z9vhbkDpyplKMs279qC7yqrfu1dfy9vivx6fsboHo7fFbkDr2+PtakTiIq2zy9fhbkTnY5dfzqrnyuMTy2bXu5tNbkDrIqpbL28n3mBf0q7r0q7pVlDZ2s1KzqYWnxpjNNUvZqaT0q7rzqrn6tlHu2+JbkDqZuYnZRFr/uLn4xHVZiS92slPDIzrm6uvk6Ox2sVT1+PuAvUWlrHriTWL3u2/3t5BZjjpztU52sVSRmmfL1bnzsbPvzptjkz1gn0B3sVSAsVmvbRNXAAAAgHRSTlMh9f758f//1fMRWlD/IXP/Alv///9UAf8SlwL/SaDDt+2nqAMEBYhAnA1+WwD9/v3+//3+/////wrR/f/9k4+Q/f//z/9t//+vsC4w/bJO/LP9//7P/v3/MG8TLfz+//5SjP/9b/7/Cv8NSP9NbdFJB/////8tELD///7+/wiO/yoXQI0AAAiJSURBVHja7VlnVxvJEhXJ2Djteu3NeV/cVffMaIYJykI5ISEkQIDIORpYjHH861tVPaMAsixpzYd3Hn2OBR566nZXvFVyuW94uW4BbgFuAW4B/tcAnj1zV4vF6vanB8jETbd77gev9wcOK3rvUwPEGbPMKuderxcB+Kr7mFlB8xMBmK4AG2csAIL/9N7RNR/nRbclM3h0eHAcN/8mgJk5DFgyiPMDgD60NKIAAP8RIVkqz5jMzD4Bnj3cXi2upkDOKMPjIoDie7qv6PCLnwAsJgP0Lw/nisXVud4Atld+8v4MgtYZLZQ2Cv81FOXBqZFMGn68Ex6fxXa8P5FdVnoB2I6Cur1nzknpQ46hGGVpS1EUPbaOwmUmv+I7Xu+fhGD2ALAK+8+8d7iPMzrq651pWZ6Ch5pyqmgGp2vFdl4zfOYFy/tAb/d6AIiSQb/SFC3G5PHx0sTsGluHZz6QrvimhN7WZifoUnxkX0PDRKuuXgAMxQBt8Kl1uAEBoJF9PgSJyQ5AiS5l7JNnoff2oCI9qWzt+wzDz2wVrXOxNIXjrcblaaEiw6csLWlaUoO/HQavR99VgDyz4mNjUXKZB4ric7yFzbyyEQzuFzpCIxPk6RdgeGVoCvTJgh8BOMYX87+iDXzKlmIYjnw2HKlwvigw7l4Oi+eoN7jClk/XuT9GHmF2BgiS18DNhxTFANuBQeVxVkBpTzywTlD+iSeSwCdygVTmM5Jod5lclwVcHQHytOkVGZnrYDyMVTmBTi9HEEEdOHnvCasqRccoAehcFxqjmwbGOgG4UhRUU7a6FXCjwcTmYzowU9VwWJUkScWPAp4kZ+/jIh4RwLJGDzoAQGKDvdOX9nugWZ4Le8IgtFbLSc0rLLOCKp3YG2USPi38l8U/BPDwoYV/H5x4n1vmvCLeRbWQyHJoMpudd7+dz2YnQwCJsB6w+jJsjIHC5NLExGtwZ79fzrQF2P7eO21H0HeobQ+A8OWIkF/emG9V7fxGGbWF+yKQsyD45LPZ77xeCu4fzTYAc5z/LG4IJ7kkg95dhB9wUCmUbReO5yEbIfxyEJVT4q+ckle9DvBfeDwI90SvQYXWIpGZAugBjr+x+6Fcv7sBO/AIFBZU8ta4prUkDQdghROCE6K0Cqj6jbed6tXbDbIPBgop586Dp5iYog3m4QBU0Su1p9zvJ4+ewXuA34Tefqxkz4OiJCxtVPK0kSUIIFxzbW4AQblPiUZmsUQtB9rJdsMb7kvSJb4CEpKK7ytFNwzM3lcATCwyOhQsQwCg16fnu6M+82kpV0skhkjCF1jyFF4vQK5GlcT8cLoFeQWzJBw/9GW35OozVJNKqVaBopTUhq4D2CpKKhr3Q/ldlqTJXgjipCS9JBVxwT+uq2hVpB4oWEhL+EB5tzeOe15eJCOjB677p64buVovWOAEA2p53t3j2h3A12OCQ63LlkP5HIADJ79BmFTC4aO9nnn6PSRkoibImLqtZgAz/yTC62vR4zl63jPAUYRP+cUNICPARzMAkMyIJ5JT36ClKpBeXvTeaSx4nmCyHM+puRkEabkBVEo5gmlNUis5j6d20E8v8wfll8copNCoCgIgA5VXJgApN1wrWGY/AHmUHyEhEaDeBy1GhhZDFn+T7jIr01c3FgTVb0o2gBVoBXAFUlgCBUKgrwu4TYslJHVTRRVBjXZdAcD0PJMgNf2nz4bSHJbCICYnzaCnxlvjIGjXgcvNiBr+vD+ASUml6j9MGT/fHoAl0MdG+5P/OCFaCXKnYCtAHIOPOCj1RX3c4TwMKVsE8ijyz8yVeuB0MuIjnO1VfrYmcoRddes0u84qzECKuknB0XrM1qCfzUY5h5hq0Oz6DYQRSjsl/JnAat+L/A1pUxx+cKfUYoJWI7PpidkJgEkkMCRCn3Vd0dLg+yLFgQBB3zKtAKbARwC4IJuhmEvvdl2TYW2ib8oOQPAqbbGQdI0LFYEGRciXz7syr0gAKjl46ayEtSDlugpgWqxB8qG1sEl06KOX2A05hHvYst+Hf41s0/CieCpV7yJk2XmrfP8j3lN2doYOmjw90IZdf31IAAw/2S+fq4t8eYCIdYeQyKL4NwNvBio8unJMr9M1mlqEpv7AFRTggeCvQ14v8iS+/KaTnsi46l1o9anS/o7tHBOnPG7bgJgo3xpzRZGHn9FLL8X105O/XZX+j0nynZc4dIBpBZIdqDhWIABNEmuqWK4rk628SRQJRk9AcoDA1Hum0P0mJnO+kbYfc5pWGAbSKVdGOL95bH6oRzvO1CcVDzQEWK6oTY1ZOh2ClU43niBf1PnIkoZsNFo1uxolFJFiaiNbYgDBVanDUmlEou/jYdpPK9oAVEX7Di8lk3DxxU4A6ShyNd/SUlJMK+a6GoYUiYfvIw2Hl6LZeihJNTuJOHbJYmsHnHeEphV6u7lXG4AVMTw7Vbhh2Ne+L9SOGdNmN+hZzmgpCZs1HbuO7gDIBtCn2L2Q3TFCc1wuYJzPJHLYMtd7UxxT6WRkWNvdAKBaUfnUp/BiI6uMiZSbaipYCGBo5BUfmAy62k/sOJ0Mjv/9wp7Dgw8ClqglMI9ycsG2Q8oRYO7fewtdALz4l8OydZzceI7+Kdhl3qmI403ziL1vGntx6vCoC4BvL95XeOWkPqlYaJACEF4alJsL1gIOEhYrDuu/+LIbFT0/wvnAophUHC3Us4gYlExQt553Nu/h3vfLgvW/+7a7oeCLC3zr62/g451jgAzRJXltFgaQULACTW0BbpsbAF3udT9a3rt4BydfWHjRkggBYnptDWa0LHXYdJxHF4+eu5+3sW+P34DELateUtnhDXzF4gpYDu+U5eBNfIfjqtdcJudv5EsiOruVaqE9nxQgiOdPBQ6D+bh5IwAQbFbGZd7g92iZjHn7VeMtwC3A/yXAX0yxuOYcety6AAAAAElFTkSuQmCC", "reo_emoji_bodyboard": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEVUq+0AAAA7iMMiZpm53PRIl9RTq+8tdq5Uq+1UrO5Uq+02grtUq+5Uq+0mbaJSrPRKtfchZZg2hMVDjcdsqdY6h8I6h8KWxOY4h8MhZZg4h8U6h8I6h8IplNaGuuAbY5shZpkhZZkhZZkSW5IXXaIeZJsfZpkA//8hZpkwj782grxLnt5LneSBt96mz+0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACnCqLUAAAAgHRSTlP+AP7+//8v/tFLsf90kf8TEMsV///Obf9QZjaNqgb/FypZlg4LM0ECoxDa10H//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF1/44AAALaSURBVHja7ZrZlqIwEIbLaBYIm4LS6ow93bOv7/94g60oCKlUCMzN8F8p5/h/VipblcJiYsEMmAH/FJCKStkkABHFIdyk4kiMCRAx9CiM0lEAaa/7lSG8AUEIqOLMCxAosCoaDshCoEgFwwBZBFSF2QCAUECXSp0BAbhJuAGwqWlQ4ALIFMB4hC5AwCAFVMBAf2MeYCx/gJQC8PCHkABIbSacVeLcIQ1Anz9cy2UtKRmnDVILgO0+bPmohHU2VwsA2X64XPZJcmsIQEpw9fUTKWViQ0QYAEmwlJpddE/DutLbC93c9jCAOQGSNaTlev/5uf7Qh5dv64Rjqw2sA8TZg7abtsWnlx/IGN0AiurfJSwWh5/GxQaWE4D1qUuoz28zQDn4M/bOdAMx5iAgjE9Rrsr6wVP/QZsZZ5Gy+herN+XXt+/dro6BbYB4efFfldcHOzeAJQP5aXVTHcLGBSDwDBSrhuqHRxdAjAWQl03/WwTsQAd8RdfAqeVf3BcDHYAvMoO/aar2AWIqoGzvG2QAoIDftf2fx23pSAQIHMB7RsdhqgJyUvIG4ZQTt6QegLKdBLwo8v5N70ABZMhRbNOWAkDOemkl7AgA5LKSaCthYweE2G3CCjjaAch1US/9QwAkx5BX10ObbFMV0At7dXPzDQHQgrK6x/lmAdCCW1NCwI9nwEvW893TBsCXM+AdCUkIAT8XAC+KOSGEnQ/gHMLSD2BTYh0kTwC3hvDkBziXT3gI3019yjDKKIDzYtCOZ8KtXxNQABUhcUtBo51Fax1obJC6C/lXs3SmtSF4Qk7xx/221W6jdjpMWZCv+y/3mnP/2qo5nWTwv1fNlxdseLcG86+lwUcde51YmiOu4sjX723v+CD0vTMiRzK/IjjS8po1a9as/1dqavt4WkAMYlqAQMvYEUYIbyWMEMC52xJM5x/gPbsx/K9903AK+8tP/lDXC+GoyVZh/c+IvwNoKrmn+EBpAAAAAElFTkSuQmCC", "reo_emoji_famille": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX+21z+qzOYqbT5dD0AAABckTvz9vjBaU5mIRP8yE7+tDrjo1P2ukz/qzLQhlLn6+z/qzL/qzK3hTrSmUv/qy3/rDD/rDHb4+jw1amXq7P7dDz/qzL212Z1NBr1yorId1Dzx3H05a/y6NGDRSGUWSiqsqXUoUr7l0dndn5vjTpolj1nlUaudzWlq6b7vmejbDC4q4y3uZrdVR/atU3OxVLYyX3Mw4f8iTj6lzf/qhz/21z50ZL75ZN1hY91m26KpJjDvZDmXSf6h0P/syj/21f/217/3Vv/3Fzr3cX/41ZfkUCOhzuSqkWwuEzAjj3Uq2jX3+X6fUD1kg78t0D/wkX/21x/n4KIkYegqkevpm7Ffj3CkT7CqoDVsWzf2szgYyX/uT3/213/32D/4F3+4Xf//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABNkRaPAAAAgHRSTlP+/v//AP/////+//79jv//rs7//xQxTf//QEBr/f///////////v/+///////////7//////z///8JjP///////f//DhItUGT/Ff///////////9HK2//////////n///Ssggp/wEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO6ypikAAAWySURBVHjatZgHd9s2EIBBUqINCLREy5LYSpZkecUzTuI6Xo0dbzdtmrRN9x7//y8UBEXyAIIALDn3np8lCHcfDncYB1QRpd0NGg6XMOi2K9Yi6LXADwj2ao375BK0bKzr9CAgcBTSMCO0emPAUTtohI5aggXd1JTrJQikdlGUslgsBGY9ZO5W5oSNXgxoORYSFgntsr505J9kepeo6zgTEUqHP/T9ut/P9JBjKeGljX3a7/v+O9/3sxZrgNMw2t/tn0RR5HeY/dwFewDMJeX8R7Hh0SgBRP2HA5wsDAvK8fuJ1OscEA0fDghSQEMd3M6YMP6L6EMBzpHGAYcmZseAeuwIlQDYBOiqI4wJ/zfy67EPfbp714kBHT8SARgRU6omAKmVoGRkQzbmTidyvnH643AsCQCCkJHAwywvfabHCbvRHTN6BwBDCIjtGwk8U6W1j9GYQHme+n2y+3ti/wQGObHPehJjHgVF+0yoQ5MYd/jfqD7qwzRN7RsQjUKS4lxxmC8DFuKoTwEAdBMZBAu8UAIQqLWU5ih3YQkuNMl+Akksk3EElQAqaJyygXfq/igGvPNH44CiJA2UwhFYCL0AkMbV42MfLSUenPC4cABGSIPgs6AEkEL306VYRhxAk8gzAEU6IU6ahRkgyPNfJb1e7EOUjJupO0gvBIP1EQKAxvF/T08RTgbuIIqsBKRpV+uAPL78Y3NlW4LBFpIDWmIG0e2VpqgHW3I/8ezs7IoYYdhC85X8nzhDK6ybOF3Fllh+Ya2zQstb2ILBfh0KMxT3mhcU45a3BcB8ATBfBLTy88AAmH8oAIEjrT0RgLLWZaHlhdACDpxLAbDMur0QFIstXJ4uLq9pWuCpH8JlvLa8+FTUK7bYLoQ2uFWgxxZ4Mep+JECYlUwfCdBNAUcfCZDf4MNpALVYClsg5jm00GblahB0A8VmSrmihf0ZLgpAKwidkuM4lkSvSJBHgudiaRYPnkIxSUTVJlcsmLM7D7D62kqwxXkQWpgvvygZh+egBdMo9Hc9YlAOUOVK34Wa7vRa7UZciB/rbxXOFITveKV//wGuACjUxr5DaEExBYzfKv5JE21GEkysKisq66WA6/Qx5EZJGGBsWbvRgdL+Tf6cc5utsrzbGrIuEAkcWrbWbuB70W2WV2tzg5nBoEnl/Ce66WI2a3MDpjhXS81/uBZfvK5NGaSdr+J6++tKflK7Oi65LmYLCj8gVW9Vj4L3x5odwrBliJrH9yWvjhVxlRQ3BKIJQi5/VypWgG8VGw5YGULUhSBULAF/qkslnFqG+xQpB3wCRemBYrvFVHoaEACfQkEulJ5iH8WlhwTOMw0CsAfFCCjf8AmoD2EvqgF8Bg38ZtqMiXoYNQ3gHOrvWZxYqQswi9Y1gFVYjrqGWhKuDdjN0wBgEIZuDc6QvN3QMgDWAkAQzt2vcwCrdhal6mcR7ii1shDIgGd5xx13LwcssqIFXsbAdw5Yz396rwXkczR03Z08xnLZBb5zgIfVSVoEZC6ssi/WgEMvc+HCAEijcBB/rmUAwxS99DyqylEVICFw+3GU7YIcW6JK+wqAu/rsfDX5tGeTpjieoVguauvvPRtALjs2hQzmM1QqWgALghXAmxjwq7xVKMokonXAAHBrRFFfYWmz86YA7EhzRGORZsibBuDumbZT8nI6gLtjCPGhNyXAPdAfN97UgPH+l5S3mTTVW9tEgNUerNDT2sTSvg0g3WFrsDZRHV4TA1IfWA3ArTep7fzYAtwfhor4HnqPB/j8yU89+dHkj9ePCnjiHkAEvXj+/LEB8NLEovt4gO9fbVW5bIEn1epYNt78PB0gNc5lPwP8CFo3ticHnEHz1epXGWBTaH8zKeCsKspman9f+mFjMsDZF5KdzIWtqj1BAyjYT13YL/xQnZ8A8KpopvqlIgIGF8oB1aqasL+p+qHUhf8BvH6MHw0KmrcAAAAASUVORK5CYII=", "reo_emoji_famille_1": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX23c0oLjKYqbT5dD0AAABckTvz9vjBaU9mIRPao4/o6uszODooLjLqx7VHSErNhm7PuKzYxbdXV1eomZAoLjIoLjJraGayq6aQi4i0hnfc4ucoKSwmLTEnLTEnLjJwdHazpJuwtrqXq7PLyMX7dDx1NCbMm4g9QUSVlJNllUaSm6I6PUGCRjfX19blzsDx49qEfHeLg33suaP/5tBgXlx4g4nGc1r5eUX2mHBveoJvjTqMV0fytpv23c2WYFGgbV6ndmfdVR/KfGT8pCfmrJX5yoT33c4cHBwkMTFcY2dvRTZ1m26Uqm2KpJisWTjUknzAr6TZ3+PmXSf0hlnr07saLS1KOTRdW1pfkUBjYF6OhzusgTy7j4DYZTbCw5v1kg74onz7vmX34M0aMzM0ODsuMzhUX2ZoZGN/n4J7oFiVUjiBeXSNg327fzygsnu5v5O7v8K8wMLFfj3LvJXf0rfrbzz4jWH9sD/9sUL23cz33s733c/33c744M8AAAAAAABAQb+zAAAAgHRSTlP+/v//AP////////+O/v////79/a7O/f/+//8UMU1r/f/+QP5A//////////////////8S//////7////9iv////////3/aQkV////////////////Dv/U/////////////zEKrdz/y////8zS////////////////Hj5b2koAAMjshowAAAZ6SURBVHjatZiHd9s2EIdBUqItUaQpUhIZ2ZbsqrZk2bK8V5zlOM5eTdI2aZIm6d57t/97Ac4DCIK0rPzes58E4e4jcIdxRAVas61KTfJUr7RmC7lF2c2AHxDsNRP0iVWZyeNdZAcBFYmjWjZCaBcArs9WanWJr8q0aGqy7BB/iLTSYjFdEdu1fEBWt7RB5LCrPcGAGSmH6jeSk5PW1+qU3chuGrUkaSRC6uM3VLWsbkd2SMqp+pM8/pf3e6r6UFVVLWzJDZBqmf5vuj25P682sX/V1U4NgLnEm3/NIY4HHR/ghIRTAKQolaa5z696KpfL5H+/3z49oBICuMum7T86CbGqNvG/zvJpAdJ1wQAky3ft/y+TgQw0GqDZWYAWP8K2P90DtUzGcO3P16hJAE3VoQEu2spKVR/AtBpozp8j7L7ZfHz146vX/LlSf6IAFkLIyhNmdumbCHljb/R/xLODAGAbArqrGIAaOTKVWfs2sZvDs2Q5Xgyu/fF64PvvwyAbVeTJNjLziA5Bz7erNqSuH+Om9zcYdLZhmlooEoXQOKu5Rq2uyM50g3Xg/XvY7y0DwDqCMteiWFiO22WjDADhuD2Vwxz1hjB0tAigzaGEqs66EQzN1tIADcpkiB8cLzAvAA/VMlo1AoBmIr7mDD+G1XjSKEAbMYBoivAISGye+oA5lCqMMMhwNB5gK9F9WC4Phx6hqRqmn/aIGScjPEwyzQ4EBFmkVdOMCGFeWiMfDQyoigBINxywPuoAsJ5uNCwP0Zr34KaEhAMgY/ATC6RpsNBWMwz9BzdQFOHFi5eZaOMWPfxsxIAZOoP0yxcXmVGDFjdunZycPE/3gy1tcCLEOwTRedxNpwxhS/zMNm6dpPo9hy022K+9q1wUOtLrHGVIWp4npuxcAkC1+Hk0E58HSAw4d1qACY40cuRrpwaYuHUlvaUKDpxpCrCCu9HZkWzxdGlhpSRogad+HQJKKwuXaLtkSx7Bm1ENAsYleDFqvSVAPSqZYBaNEdAKAZ+8BUAVXh1JlKsjuyoRbbCtjpdD07O4XK1UWnipPWB7bHiGabsl8D/hie22jpdxBZZ7FjsE344l6Ig9z/QpokUW8FRKFJOGTe+9nqHO2NmZ54GnB2vca5LxINNyC32W7X5dS72JZT6ehm7YGV3mNNFdzzCFxm4FFTbF/tsZ92FNRFj9lBTiF0T+jcyqRBOsiG+9Sn/zX7gCoDZWjRx1j5GwC3O1GryreBMm2gQjfStXZdVg7ULAX+HLkH/oRRZoR7dz1m72Dtf/f/HrnJNolVHdtJwAAw4+Wmsn8H3RSbSQS1M7EztH9w9JjlFOugICvv0d3z/amTiaKkVL+YR+4/WGkwOUS9cRRSFp/Df7Sm3zAm+HBrMQ1JJ8sbYXNjnv7FgEdKiRkTvpMTFT3DNvHQtUt2/AWxrfQTV1WfSg4WahkAvwRbz3R5FzY4QFi2qq2CnkBHwQWq9R1zF3ywg2Ib3BjzLt8h0oLqDH2WHbOBzLmLYsJcpghN6FQjIU5cUSVjL4hZMbV28QoCtQAkAj+WxUFneNuPSBvQ4FgE7yJEjfjHUrfgwYg2MBgPLm8mtV9laeyKI9AWAemspUpZSqLhuoXQEABmEgd+EMsSejSYXKTosxCwBBMOXP400GVzsLTPUTfvduNFPxT6+EADBHjrwf39IXcNECL2Pge48AHqXNEAuI56gjy/iNVTel7ALfybH3vvI4uqIqYkA0hHn8RcsDIJvuLWUv/OVRBiCMQod8Nsh2EE1JiZmiUgy4pygbvBzlAXyC51++GcVAEGRy0v2mKLs61z8HIM9j+Z/2wVGVmqY2mSGiR6/2dpU8gFj9PIWM681QqoQAvNTMTMCapCkjA/bZw4DcC48Rs6vfGx0gL1uc+oquYvAiOAOgzxTcOhFdI0kvzgKQe1nbqfW1ciaA7GTUP7eUMwLoUy6h88qZATIsbyMFW+miMgbAPK940Llb52iAkHAcuz/y/eu74wFEe3jJq0927gc752EO//kAco8X3z1FGRtgez+RrYcv3hsnoN2m0/Xw9ytXxg2AFwJ8NRkf4MvbS0VPSzHgl2Kgg2c/nw0QOvcUHz53QOvBd6MD7kL3xeL3EYBufzYq4G6RVjRHL5kfDkYD3P2Q8VP8IQB8VcxPEAAS/sMhvEz8UPxoBMDtpJviHeL/8VLyh4MRAEWe7vyKqku8H1KH8D+0GrGSHbadDQAAAABJRU5ErkJggg==", "reo_emoji_famille_2": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXy0qIoLjKYqbT5dD0AAABckTvz9vjBaU9mIRPryJnWm3Y1ODnUt44oLjLl6u1ISEXNhGSrlXhYVk/ruYsoLjIoLjLMq4VuZ1iVh2+4o4Lb4ucnLDAnLTGztbAnKSuGemUnLjKXq7OyhmX7dDxtdHXHdVholUaqd1iiqq7bwpPpzaKDRTCRm6Lx486Gi43VxKg+QD5xMB54NyRiXVJxe4KPlpnX19T5eUPziFTo3ctvjTqSXEL3mmYcHBw7QkdzRDNkamx3hIyPUjqeaEyxgF/dVR/bonvGvqrY3uL8pCfhrIT10qHy0aEkMTE4PkNcY2d1m26KpJisWTjGys3mXSf5uW333J741qTz0aPz0qJKOTRAQT9bV1BfkUCOhzuOplycqmSsgTy6uXvYZDTEuHz1kg7xpHLy0aEeLS01ODkuMzZUX2ZnYVV6cV9jkz9/n4KAc2GOgWu7fzy0oH+7v8LFfj3Mf2Hrbzz3k1/9sD/9sULy0aL/5pkAAAAAAAAAAADpgiRIAAAAgHRSTlP+/v//AP/////////+jv////79/q7N//////8xTf4T/2tA/0D8///////9/////Pz///////////7/////Cf//+P////////////8sjBX//////////xAWUGT//9T////////////82xGl3P/L////zMn///////////+yCgAAAFU8wHwAAAaISURBVHjatZiJe9M2FMBlOzFR7MSJ0yZO2jQda0tC01KgJ2eBUUrLzbg3YLDB7vve/vjJko8nWZbdJHvf13y1rPd+0ntPxzMq8DI7X5nSqExX5mcLuYXTmwEvEOw1E/SJpTKTx7pKDwIqmkSmshFKvQBwcbYyNa3JpTKnck26HkMg+RR5SYvFXCVbD2V3S5tEHj0fMKPlkOnbSeek9XUfVlcjvTk0r2kjEVKHv2uaVfNKpIe0nDL9ZR77d9Y3THPfNE0rbMkN0KYy7d9d3dCHXbND7Jur1pEBMJdk/rf6vuHNhwzQDwlHAGhRKs1Jx29SqVar/u9wuHB0QCUESJfNAhu6H2LT7FTNav/SUQHaRcUENJeZZr9VfyJVhwdYXhZgXh7hOnP3pln154D/frTT8QEds88DPORmpSoDCK0OqjMfEfOdDrr5xU3MfGV2OYCDEHbzhFlc+k3ECLvDX4l3dgBgFwIsjAjhbI5MFdZ+neihNvGS26cxwH892mT2V2GQHRtRqTuZecSHwGN6dku7xGLcoX+b+w/XYZq6GIXCISzJaoZJarUjPdsL1gH92R9u3AGAHoJi96JYOG3PEqMMAOG8qayEOcqmsBovNKuOEmK3e3QmLpmSlQZoYcQBSGpWTRqAfXMH2W4AsGwkl7bDYmjHTuMAC0J/OvaVFTaDDdLwHQPUUaqQeDj+dCwZ4Gyy/8rKzs4O3SpMh2QvavmAFlIIdjR/fm0ICLIodeI0GF0aV6KONBupCTRPzoIYBICeQmsFoR4deFNDygn4BMw6xmkaLDScocgG7qBm2FA+f0KYDGxxYgDbKqKB2SfOlwXToMWLR1oqlZa5fg3ScjV8WAAnQrxD+HKVdGtwirAlHvNx0lrips211MF+Ta9yAzCw0nHOqYmWPACWRzPxecCZOzE+wAZHmn/kW+ioM2iS1suJligqNjhw5iAALZNuTU4x2ULl2unlcnoLhqf+NASUl09fE7Iv0ZJDMLwZTUHApARejOb/J8B0VDKBLJqU4PjWQuqhHDvFUcWGV0c/yoORh7pXJnKQOHxoDs3NknK1UpknS60t9jjw9faSExNbyseoiM09sowrsNxzhZ0RMz0h09EAiedZo+aL2I8cCIli0vH4kVHFhrhBZJ4HzEE96TXJaWdquujrzHTAPSv1JtbK0MYWul3PsF+3VHc9R33iehVUeKweQivjPmw1Vdpf+YX4LfWtIkssxRx+opX+v+8DY2VRDnLYJ15qJhSDyNjBt4pDfgnEknWbDyMt6oVJfhh+DHkqJSw26jlrt/qi1P7T+HPOs3CV/Q66YWzlBDgYDK2Gof3we9GzaCGXa4vHFhdrB6QbVxQ6awpCG+FmbZEo1srhUn5/yH/xOpTkAGfSa6uikND954n4Se1xIlsHvBeQKiLign4m+yj4REBAg9YgqPRShF9tt56kfHUscN1+TCxXO3VZcBvr40IhF+DbeO+PPOC9iBudtCAUcgI+CbW5SsD23BfBrAatPIAPoEgBXnKHqrcsWro3w6i48PWHUJAO5SR3VigrGVLeenH1BgENAwoPOAVN7CbHxvlqzYlLn5EArOZI34wxtdpKVJzvFIAuNLCqnAB37eaCvJ0XoHOVUqqsiYHaUgBglE/pl4CHsHgNip6pj46nhUAEgCB09W/iO+5HpdIZuN+AZ3qjqcWvLigBwEd9fT2+pZ8mRQv0Fnimm/p2modEQOyjU7o+1LS14Ems9MCzvyc+N3CKhxKAbuwhXbfyAi4bF+Q5lASEUbjh/+9ELjpDDML7Knj2D6IHhtGQRkACYARqX78bARRB9gF/GMZWQ2pfAtC73W6f/bceH1XpaVr3PeTL9oU/t4w8gFiGWsbHniCLHhjpogSQpdbMBPQ0yxgZsC4cBvR2KTBd5QQyAPodV1JfYb78fG6MARhavLWGL8Ld4+04AH0jazt1rxpjAfT+SaX9Xy4bYwL0G0rAeWNsQLD/4RonwT5RNiYACJy0x9cm0q1zNEC4wzZBbRLY35oMQO8GXtqrUethDfAoh/18AH1DVm9vG8bEAFfW22K2vnv78SQBCwv6DYhobF+/PmkAvBBgw5gc4Id7S0UqSzHg82Ig517+Nh4gNE4l/or2GrSe+3l0wH1ovlh8HQH49pejAu4XeVlKeCicxGiA+58KdopvpBNQExSAhP3iEltvbxIvip+NALiXNFN8RQv075Mvzo0AKMrk1QDbS7IXqVP4D/GutqpKesBoAAAAAElFTkSuQmCC", "reo_emoji_famille_3": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXUqocoLjKYqbT5dD0AAABckTvz9vjBaU9mIRPKiGo1ODnJmXlLR0TGeFsoLjKqiG/l6u6Od2W3lXgoLjIoLjJ2Z1mmqalYU07b4ucnLDAnLTEnKSt4NyZlWlAnLjKXq7P7dDyYgGyia1Fmk0WqdFn0eEVpdXyHSzaVZ1CRm6K6qpvQon3sh1iRWUOJjI2wfWHY1tPgmW9xe4JvjTp4hY2Qlpuuom/Mysnm2ckcHBw7QkdFPDlBQD5cYmVnbG+KmVbdVR/UrYfUq4fdxrPY3uL8pCf5yoQkMTE4PkNvRTZ1m26Jcl+KpJisWTi0tbXaqoXUq4fUq4jbt4PYs5XmXSfiyrdUTklfkUB4aFmOhzusgTzUq4f1kg77vmXn1L4eLS0zNTgtMjVeVE1UX2Zhkj5/n4KVUji7fzy7v8LcXirSZjvFfj3If2LFn4DUqojrbzznjmL9sD/9sULms4Do498AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAffwUwAAAAgHRSTlP+/v//AP////////7//47///7/rs3//v3/MU0T//9rQED////////////9//7//////f///P////8J////+Pn//yyM/////xX/////////F1BkEP///9T/yv//2////xGl3Mv//////////////7L/+v//Cv8AAAAAAAAAAAAAAKaJ0GEAAAZASURBVHjatZgHd9s2EIBBUmIdkiJFWdO2lMpbkbfjveLYmXYz7KZtmibde4///0qA6zAIwpJy71lPhnD3Ebg74I6oQMtExx3XiFTdzkRBWSi9FvgBwVmtaE4qbkvFukwPAlxNIOP5CKleBNibcMermljcSdnWZOuFCCReIi1Zvph08/VQ/rSsRajoYUBLU5DqI35zsuY2dsorid4k6mjaQITMxz82zbJ5N9FDmqJUv1Sx/3hjyzTPTdO04hFlgDaea/9oZUvvPTObgX1zxboxAMaSaP+tOja8thMC6jHhBgAtCaVJ4fObRMrlMv7s9eZvDnBjgDBt5sNHxy42zWbZLNf3bwrQ9iQL0Bqh6fCzjBdSdmiA5ecBOmIP++F2r5llvIaH/7zdbWJA06zTAB818kI1BDCjh6gb7lFgvtl89+CLBw/DvTKfUQAHIeSouJlNfQ8hsvbj3k/B7uwCwDEEWL8HgLw1kEhlct/Hel6wS4068cHDv9+uhfZXoJMPK4iIb+XGkcvbR6jS0PZDHzfJ39r5zgYMUwcl4sN9sgTZDIPU8hK9ih/lAfk47209BoAaglKpJQzHW7RYLwOAYwO1V3GMkiXsdNNEs7qIk4oXUhxq1xhAm1J5FTx4kGDEAefmGqo4EcCqILF4TrjHlZRAAeh1o2vy7Ltr4Qq2gpFaCOiiTOkeEO+kBAhocNPP3u2ene38RwAO9k4bAxpIJo6G1+dBQBRFlp2hcr1LcqwWqiPNlgLsQw/kRxUAatlK16/OUI08uKehNlIRD4RplGh5KqFnHZQE8urCMrOY1YVFO92qBNCiI8heXphlVr24sJpkVTo6Nja2QM+DIzVwI5CvSWgsBNPoJ4MjaYTOBqNj1DxqxAfnNSnlEpt4Fr0EfgTLNAegRkIntNL7gDI3zQGmOcCsHFABVxq+8q0bA7xgdCp7xAYXziQFmAqmeZQiP0JkeWxqlRtJ58FbvwoB3tTYMhN93IiKwMpoHAJGJbAw6rwnQDVpmRQSeRBAJwbsvQdABZaO2Mv2wKZuYbEFp10QQ5MTQbvquh2XFCvMCUQUFex/QIQdDs6ilgvbPYe9B0M9lmAj9j6zS1i4J2loXDPp+PSTEUV26b7afeDVhGWS4+VqOujrfPO17GIs9/Es9MjPmdKV1nqZJUn0bC4qPJfbb+fUw5Z0m77Cjfh9eVWRJ7I1fEY6/X/fwAyAYivYD+pmTi+OQTt6V3FKp0Aq/YZSZ9Vm9WLAafwy5IWQULJ9xd7NF9t/kb7OeZlkGTXNUgRY8NGSXHsB3xe9TE+UUgApkcOIWoAlowWRZP+G9UrJKfbmlH7jdSpKEmij5sm8wOn+ccW+UnvORatNnQoo6iXFwuq+FL0UZBHQICmlvexdonPh/lXGW8cCnSVcMlUOMuMIKl4VCkqAbwStGGinHJiEVC1fUAR8ItSu+A0rWpXdFnuZNnkbihAgOG67bYtULolXHPjrh1CQDoW5xGSdTNDeXqTdGwTYBhQJ4Ih/NmqvLCdtfeCsdQngDrRwLAhAKk+c9L6AneRfEkAdGrgr7lUFBRPt5CVVgJ7hYdGBAh01JwFQTtD3YadkcwUPjIWLLB+zAOCEuv5teshMM90J+J9UNLNZO8QCwB7p+kZapbN9HfifHOpzWTvEAnQI6NGARQawmAIOjL44SHlAPd0hXbdUAPjQfWIsZSyAA8ReuIO/OwkA93WrTJ+3mja4HxnGutADAkBIIPb1owQgcTIG/GkYc+tC+wKAXg8k/LYBrqrMMPXxDmGZW1qaM1QAqfRkJ0UsF2SHMkUKCFItv0CvaZYxMGCDPSoE7ZUjXUAOQH/sCPqrPt1+HhhDAHpMw21joXsk7ZdhAPpW3nHq/GAMBWBuOb57e2IMC7gjBSwbQwPiJZQoiUp0zxgBoC5qHvqiy2VAQEywQQ8Q2Z8bDSA5w2+F/UmcausK9tUA+orIvyXDGBng7jyHuPXzxyMFzNPhur50796oAbAg6BvG6ADfP50pEpkB5Vwxks3Xvw4HiI0T2U4AJ2B088fBAZfQfLF4kgDo8deDAi6LtCR7tM38sDkY4PJTxk6yRzNFdYIEwNmPl7DN/VD8fADAU95M6IX+d/wPmwMAiiI56aPtGdEPmUv4H4uuphbo/kH9AAAAAElFTkSuQmCC", "reo_emoji_famille_4": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEWufVYoLjKZqbT5dD0AAABckTuQWTTz9vhgNSqPZ0k0NTagbEVvWEVNRDwoLjKYYjzl6u2bclEoLjIoLjKKXEFCPThxRjTb4ucnLDAnLTEnKSsnLjKXq7POeUv7dDxsdHhojTushmijlIZTS0WQhEuRm6LpdEKTmJurgFh9YEmFi4/LuavW1dNxe4J4hIuip6scHBw8QkdVWVxaYmdmbG+xXTqufVbdVR/JysvY3uL8pCf5yoQkMTE4PkNMQz1fkUBzi0JjlEp1m26KpJi1eVWufFaufleuflazgFWskXrFpYvmXSfm3MtgT0GGTTeOhzuufVesgTyzt7vMZjrNsZzSwrT1kg77vmUeLS0wMTUsMTRfTkBWVVJsVkV/n4KIeWu7fzyvflaugFe/gGCupZ+7v8LXWSTFfj3jbDz9sD/9sULq2b4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwhfFzAAAAgHRSTlP+/v7+AP///////////47///6uzf////8xTRNrQP5A///8/f////7///r8//////8J//f/+P+M//////8V/9H//////xcsUGQQ/////////9v/////////EaXczt/J////siwI//////////8AAAAAAAAAAAAAAAAAAAAAAAAAAGk/O/sAAAXmSURBVHjatZnpV9s4EMBlO4kjY5uY4CQkmyUQkgCFcpSlUMqWLeUoS49tu9u973v//+9rST5GsmwrJp33ygNZMz+NZkbyuKjCy1LPXdCoNN3eUkVZOL0OeIDgrE44JxG3o2I9Tw8CXE0iC8WIXL0QsLvkLjQ1ubjdvK3J1mMIJHeRl6xYdN1iPVQ8LcsJFT0C6GgK0nyc3pysuftHjc1Yr4t6mlaKkLn8A9NsmPdjPaQpSvNrFfun2xPTPDZN04pGlAHaQqH9B5sTffTGbAf2zU1ragDMJdn+WzvE8NYRA+xEhCkAWpxKXen6TSqNRoP8HI2Wpwe4EUBaNsts6STEptlumI2dvWkB2m6OA9o+M81+NogjjSEPsOwiQE8eYZtt95bZID6c/Pv+tk0AbXOHB9jIKUpVBhCjizDbo8B8u/3fo68enbC9Mt9wAB+hQgINs1j6GCHq+8Hoj2B3bgHgAAIshIoJNFOF2t8gejjYpf0dGoOTf95vMfubMMiWRwFowyrMIz4ENtPzHG2PxbhN/20dH23DNHVQLDZEWJJqhklq4VjPWw7rgP44Hk1OAcBGULDtx4HBHK8pAHwPqL2LcpS6cA8UGlhGsp6Q4nAuCQCHU7kJFh4UGA3AsXm0jp0QILPPPPGZc15C4AAv+OkrdPVbXzIPJsFIWGhZ9llykOxKCBDgiLPXb+4RuaWAIWZJidLzOLE0ss0YAlw+71KYFeLD7yyufgDwUD4Bg/poAoCdrfP83Q2y6cKxhvIdiPcKpGlYaEUqbOE+iiOAWzXRKhixEkBHiECtJUYRjAA/6/V6i58HR16AGyE6gZi0gmm8HhxJ2LguTlyEIzY4r+mrnAeWUV8UFyaMpMylR1gQOsl9gD4IYDe+8q2pATgVA27EAxdOlwOQHcepGEiqt1YXs4Ebgbd+EwJwq14Ts08cURH4ZrQAAbMS+GLU+0CAZtwyKRRyGUAvAux+AIAHXx1JlL3SpuaIyE67IIe6S0G76ro9V3aLyBXT02pUxOHgqOi4sN1zRBeYXpqbGpknkhp1tFQz6WzwhqhiamFq9wGWv7Y6xYFw0LfF5u3slzG7MPnQ442i1ee+6xVsgO2iyrP8KcOC92Erd5u+IY34Yd4Mv7AryTs0fqCd/vVrmMhQoqs4X3wsUWTVGX6ruIh2uyZIYb8QxkHUiwAX0ceQSzkB2Yq9G5bbv0w+51zFVcZNsxQBPlxaXGuX8HvRFShIMgknbxJRLPNowfS5eaoYH0avf+W/eF1I30thSeGpquGXa/GT2rND2QkNW0Q8RapeyT4KiggsWsipaf5wPLzO+OpY4aZ9l2rFPEvpTPqtUlECfCrZYnDuObDIh1CxMi2AW55nO1bk1VAeZd7kR1CkAMmRjIcWjUscFR8+/RgK0qGswHnf5x75wWaB/pADGFByAPv5B75n+UmqwVn9HMAqtHCgcX2A7DqMu7dSgE2FGytyAWbROAegQ1Vd6dJlB4qdFQIRAIKwou9pKi9wjljJuQCwR6v6g+QVdFFof8Df9MydywqBCJiAHdK3k1OsLjQt4G8KGGeFQAQke7Si6yMesChvwwjAN7IcSAH0xAFdt1QAJI1eGuMMB9KAMArPye9DlS0igE8Moy93IA1gBGo/iLJVHGQCIJb6UvsSQIBYDX/ZVmlkNjStRU2N+/2xoQSIZaRSB0GQ3xrZkgsISg0rAHyjNGBbPCokbZJDQlwWoJ86kv5K6ABaxh0AI6u4O/n7LgB9UtSfOLkbVAzgT3DJdfDSuCtgNRdQsH4VQHT+zXMSpu+cMQOAvg479Bps1PvGTAATJBLmpZdXaUAc6Ll57nOBwvpVAfdl8X1rzBCw/NO6aP/Pz2cKWNZX4Wtff/zw4awBXMkZxuwAPz79rErlSWJ/rRrK4NVfdwNExqmspQGE8XN5wDk0DwEDbvxVWcB5lZeBzAH6oBzg/IlgJ3bhrKpOyAGk7EcurKUeVL8oAXiaNlM9o//NNEg/GJQAVGVyto7WBrIHmS78D+Vpk76BdB0IAAAAAElFTkSuQmCC", "reo_emoji_famille_5": "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", "reo_emoji_iaorana": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUafokAAAD7/f3S5ugqh5FnqrGz1dhaoqo6kJlOnKTg7u96tLqHu8EafomUw8gVgIgcgIrD3eAXeo0afokafokZgImlzdEYfogYfYkZgIoagIlBlJ2BuL7B3N8afooAAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMK/nbAAAAgHRSTlP+AP//////////////r/8V//8ZktMw/08zQ2////9+AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADfkaXIAAAIJSURBVHja7ZnbktsgDIYFAp+Nz042yW7f/y0rjHETQqeZ2ehiO/wXmSAjfbIk3wAIZkECJEACJEAC/CDAcmlneKPm9mu5A4wtMKgdPeAETPpwgA8ARgKIERjVEaDlBLQCFmDVGSZewBfMvADm8ElJSUlJSU9SWmtWQC5l9V8AVCalHBq1W/tmkBLXgh4g6itKBCiRTJmvp8EMNFlW9ewdAZTSKdut2b4uoZDy9kmRQe+m2u+o8m29PntHABQw0zfa45Ko6V9T24wtoLHp9fRjtLEmn0KGqw3bh94xQFFn9BBtylZUnxu9OLkUBEAslYLSrM50ALDf1ir0jje5NINNx5W4cnvJRRfS+yltUB5pEsD82fngHe1BZRuIfwEcZdtqcgAatyUPvSMAW2CamE+/BV0vyXr1AGrkoPaSBIDQOwLYqr3l6LbYture7E3eADREqProG4TesRJtU1bVfggV7oOn4e4N7CBS3OtTiQLvGMAOORa5c7KEYY9/AMDY+Mr4lt8DQu+YCp0/DvFV67x/sJS6fNk7KSkpKemHqOUOf+EFXKDjBYwgWM/UJjp17LiPNTkPZhfmo+WTPxzvmA/HSee3t3pa/nFBEc7z229AHuOfBStgXgQroO0EK2DqBCvgxHTNdfcxcgLmUbACvtXeFwDTL8EKOLHeZX7n630JMHeCFzCKdJ/s9BsF6R0VbCYwQQAAAABJRU5ErkJggg==", "reo_emoji_mauruuru": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX+qzIAAAA7Kg/IhyiRYh6wdyRqSRfnmy1UOhPclCuhbSF4Uhr/qzL/rC//qjFALRCbaSCFWxz/rTH/rDH/qzL/qzJeQRb/sCy9gCf/qhz//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAArqnejAAAAgHRSTlP+AP////////////+vGzT///9KkNNx/xb/CQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACqX3RcAAAHxSURBVHja7ZnbboMwDIadpEmAhlPpYdv7P+jsUCrD1lIJPGmS/xt+OcFfYsNNAkZYoAAFKEABCvhHgOaSzrCjzunSMMAtgYBSPQFOIKTTCBDLD9AQoAZB3RCQJAHJQAOiamCQBQxwlgUIp1epVCqVakW+IO2WznVd57OLd+ctaTfA4ZGtR5MXHkn7AvIWigfAVy4/XX44F7ONvluG7hbIflQlDzFAG2ygMBkCHO2diWxHcXvAshW0AB5itrS2xLccC80AWPSS8vYZcLU2ULXiAkCteQ6g0WcACy1FWusywIc+N9rPAW3oXfUccAzex6eAHhNTEcYSYfou/ADY63327wAb56NzAIZw9dUIQIfNtrZaALqXgACvANi/QGsgAG030qQKqqnVh7FkKBZilt5ZjC4Anc1ruOZS4aQYCIC2iGUIDDAPTXYCsNACEBHwQRvJO7ChyNuM+XutOICFmJ0ALDQDYH/G9hIg/9AeLX1LLW3syAAsxOwE4KMvVLIfsXS/DL85qlKpVKp/oiSd/iILuEAtC6jBiJ6pDdLHmvVfHMzKHy0bUwsfjtPx/u6tHpqVC4rl97z7DciPbkkCzrURBaSbEQUMX0YUcBK65tre3rcAW9r7DiB9GlHAtvauA06id5nb27sC2N7eFcCn0fvkUd/MTxyAAJNTgQAAAABJRU5ErkJggg==", "reo_emoji_maeva": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEVckDsAAAD9/v1omUrZ5dGoxJePs3iCqmm80q6bvId2olrN3cPE17izzKRbkDpakjhbkTlbkDri69zm7uFajjZbkDp8p2JakThZjzpbkDoA/wBiiTuAgAChv44AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANXcBgAAAAgHRSTlP+AP///////////////68cSpD//xXT/zYxcQENAv8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG6ftXUAAAJRSURBVHja7ZnbjqMwDIYdkhDCsVCg7R7e/zU3tpOW2e3AjKZeaaT8qlQCwZ/jAxcJKGFBBmRABmRABnwjwPXWL/BCLf3tsgHMPQionxPgBEI6MUDMPsAFAQMIagiAXhLQK7iCqC4wygJGWGQBwuazsrKysgTkClQVR28GrwQUPCjlACUNmg1Al7bzOk0LI78+NVB7a0t9CGjISvEAdHzd0qu1ubuBPli8dw4XGjT7xLfeBXQ0F8AXhTEMaIviQdbnNKpxDt8L/2bzxO4B6jghGPcMwGScrZ3C38o0UzVkWseMeXoHXTPePrL4DqBBb+hdPRHAtbQmJuvotKWFIscxVEPwx8Qn6x6gpNVbtD2lJNfhZykj5GwZRFlg14EihKHS7E4sk+eAFad3aHvF3FVUNV1MbJvyTfqdgh+jqn0V5/ldQMeZMORZxbEJCW/vgMmwYh3FcHHjGNMcABwZNGnpVYowjVoytgkAxshx1vB5Ezn7AOB16gSIEe4IsMaRLqbGcS1YjlAsP22OAZ7DvQEUlW+xKxoOivGeGyH1e6qywlpT7TSC4/VTeTvYhgjNtff63TQ5kbiGuM/OmopkF0Am4Q7gDi0xRtPmU8FG9KN16UMz1WA+/4l05ZsvmA5t4J5M089vZ2VlZWV9C/XS5m+ygBsMsoAZlOie2vg/tjXFN2blt5aVGoQ3x4MuL0/1eD04oPi7nl9+AvJPtiQBy6BEAf1PJQoYfylRwEnomCvZvypRwFfS+xEAN6McYPyhRAEn0bPMr6f3ALDMShYw5/PkqD/XNR30631qZAAAAABJRU5ErkJggg==", "reo_emoji_nana": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUiZpkAAAD9/v7G1+SXt8+wydqGq8dsmbtTiK/Z5e04daPk7PIbZJkhZZghZZi90eAgZZkhZZghZZh7pMIdY5ohZJhDfaihvtMVWZAfZZoAVaoiZplfkLUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADYb6/LAAAAgHRSTlP+AP////////////8brc//NnKU/ytF//8MSQMe/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAECu1vUAAAIQSURBVHja7ZnbcqwgEEVbBBrvOtfc/v87A3bjGDOVYTLTp3Kq2A8qtrCADT7QUAgLMiADMiADMuA/AoxT18MT1XfTuAK0HQioayPgFYR0JMARQJAAxTsIqvWAThLQFTCCqA6wkwVM0MsChJvPysrK+quyZVBNhfD4bIBWQYYK4VEGoD6kAc0GgGdTGn2anx2i81c9mH2s5bQpB+3uACi9BriK385TV4b7fi6TWXXJ4ejdLYAJH4fuNARwapFmQM3lIdSplnCZBsDBX6oLIHSw0WjUUjT+M2r2xIPWeI7dSgDM/bPUNf/OUEMzyM23qtE8MG+D9f1ArqrTADTDdQQEX+NUIHEqNoNaPFngfpgkwJ7qlhdAjdrQlFiKnb+26CyHkwHzJGHJAHNxmQE2fhtcthSqkgE2VlqZbLCeOVtAyTdbA94FgLi2ycwhvroCiLtF3wdwCwB5gVt1FVAzAJd9cROg13uaUZVpFFLs2giUNxmTdtpqMVcMgOivo+WzBQxxUze8fFMBTq0HH9qkSd4CTo1aAs0v/7GI+NN/zP0czsrKysr6++qkm5+kD6RaWUALheiZ2s6fOrbSx5qSB7Oj8NHy6786HPc6PN3q3XgjQbFdz0/PgHxzSxLQHwpRQP9SiAJ2b4UoYBJKcz1ubxLgEXtTAA/ZmwB4zN7bgKNoLtPnd2STpX0rnI19KXI+mfQJebEa1bB+fUgAAAAASUVORK5CYII=", "reo_emoji_faaitoito": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXcLUMAAAD+/f7mbHv41NjjV2neOE3wp7DodoX1xsz75ungRVnrh5Ptkp7umaPcLUPeK0PiTmHeLUPjLUH0u8LcLUPcLUPcLUPztLz63eHocH/jKDzdKUP/AADjHDncLD7gLUMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABCFsKZAAAAgHRSTlP+AP////////////////+vM/9KG/+T03T///8VHgEJHTkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALTML54AAAJuSURBVHja7ZnZctswDEVJcJFI7ZYsb2nS///KAqDlJXbsdmLMNDO8D7IskjjYpAdSaWGpDMiADMiADPhBgH7TzeqFmrtNfwH46JSAunEBrJSQVgkgZl+pngBvSlAjAjpJQKdVr0TVq7UsYKNmWYCw+aysrKysrP9AgzHnP01obia4aXL/YK8ySac1DcTzKPAfc2WwAWhonb+1dA+M01nt8qAEex4ti1IpD8XlCt+2aLuAz4D9hZFrgCXVGHvdoAsGAhoxbVmR75gvU0Bg31xdO8+eVq6MUFIMvkwTaRigvg8YlnFU8INtVc336LcF64/31Y5+o8MQAZkkr9plIqUIoHwECDhxSk5UEWJhARwD8CbahsYnHLcMaCIF7tGpWMTFMC34MkVBOUy3j7Clh2ZbpYgtFSSSixU7ih47AlCMmKAtXXEksKkI1ddFxmbZFwGOc33N9+0FwLCfdL0ABNhx7KnvLKj7gJralFO03zGAUlSba0Aq4Q0gMiD1Xd2qBzVw5KFLEfDq+gTYwW7vPA9hcSsG4KU1njJ2TB6GXUzuAQCn2a0t2Bm0HcLW4joGULYmSj8O4zMGcM8NGCqkblBcn/Cki6BsOWasNcQqYMEZ4CIBUksWKgEoFlzo0DpYd3xDoXn40TDnl9+bqw+Bd4b7w7nrL0OaeppZDflLnpWVlfXT1Emb30hvSI2ygIPSontqa9x1HKW3NcU3ZuW3lrUehTfHaXv/5aVe908OKD7388tPQG6qJQmY37QooDtoUcD6lxYFrISOuRb7v7UoYB61KKB716KA75X3OWAlepb5nbf3rwDzQcsC3nU+T076A80/H8LPgAnuAAAAAElFTkSuQmCC", "reo_emoji_aitapeapea": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUafokAAAD7/f0riJLT5ulkqK9Nm6O01diWxMl5s7paoqrC3eCkzNAcgIpDlZ6JvMI7kZoafokafokWgIgafomBuL7h7vAZgIkZeYwYfYkZgIoafokagInA3N8afooAAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABud8vPAAAAgHRSTlP+AP///////////////////7CSFNL//y8YM0RUav9+AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACLK13cAAAL3SURBVHja7Zlrs6IwDIZL0hYod1HU47n8/3+5SVsUnbPiLmTP7Az5gJXJ5KFJydspKhE2tQE2wAbYABvgPwIcP7u9WtH23e44AZw6JWC7fgRclJC9BcCbUoIElZyUoPUE6CQBXaKOStTOaicL+FR7WYBw+M02+xdmjZv+zYpsZUAKmq6GDOm3BgBcF1AywFJcyD1P8wwyqFcDZJAyhSy93mt1BFS1XTyfhgMD6DTkhkZKMw6MqjL+/WiXAdDUygFkecjRFJD6XyjWqANYDJEYYClybhALSPmyvOoVPabi58YAoLqEGiDWzQDLC+58gTOfoynAlIPPkV0hQ8H0DUBBW+I6zJYDKrgaBkADUBrry47DcoChpRgncgiA8N4ZnpMmjFvcLChwAOkA8As091dX84Jd3SrfmipncFODzf5SN79rJ8Yu181nNkC5WDefmoY/2gygHWUKXVtF3aS7tzSgw7uRhubB47dWQOl7DWfdsngNtddN9AJWVtxRTc59iAMb9iiQkphPPOYAOrZOBmmORLqJsaE2DDiMWskD6qclLQOceMwAtK5rzR1OcyNzQYwtZxlHTSiRboOntiwP7b3HDIAbPLXOlJ2pq40blhZt5sXTX7h7c8cujYn7gYnHHAB9yy/sqDMMqJq4iYiqxqrTNKPH4d7jxRkQ4Lb26DEzy0nzM8Cg0YepGEw8ZgCD9ruRhrRyQIWkWkFjQtVDDfzQWj87C4W795grcphqy1ngVeSfMvMCSdeKAKlfZ7pSH3wzbognHrM10HGva64JVnxPt3kUfhu3K+h3j9o9eMwC0Jk2vqbGVeMecnx5uchoolzSwKpHjxdW0TObX+o/C9jsB6yTDv8uC3hXvSzgpBLRM7UdnTr20seakgezx3C0LEa4jIfjvczh+HlyvH9eudQPx/vfflh4WM+rfwG5j39ORAH7YyIK6PpEFLDrE1HARegz1+RllATsT4koYFF5XwDsvhJRwEX0W+aSt/clwL5PZAGnZPueHOwX3AQi7uhCwuQAAAAASUVORK5CYII=", "reo_emoji_manuia": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEX+qzIAAAA7Kg+wdyRoRxdSORPlmi3LiSl3URqbaSDakyuGWxySYx7/qzJALRD/rC//qzD/rTH/rDL/qzJeQRWhbSH/qzK9gCf/sCz/qhz//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAuUkcZAAAAgHRSTlP+AP//////////////r/8bNEqT0///dP8WCQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEvLeAcAAAJKSURBVHja7Zlpj8IgEIaHo5y91Hrs/v8fujD0cC3GJnU2a8L7wSLSeeg7Q00AGLGgAAqgAAqgAD4I0F+aE7xRp+bS3wFuDRCo6SbAAYh0SACy+AB9BHRAqFsANJSAhkEPpOrhSAu4wIkWQBy+qKioqOifSBjvSAGcc7NtJmEkr1O73XwXgORcZLEiB6iW5lYAqFxn9QTA9TipEaCtMRb7bLwEvzX22ni3w4uwNuZACS+9uAfoNSAE9nEstsxESnMJ9qlqnEIcCtMlWXRt+eJAutOtAaLibWpdEeDjLTGqQoDBGEMOEObE26GdkwhhbCbJosbZSC4dAgx+9fgZOiqhPNLWAF3Fploeoc4DojlxmHBjDq7BaYnzmp0KHmUsAu1SGsdo58WtO8A5jlY2+DQCtJHou8fILiXvmgXUckAH1RRtyAAsUqoQTyMgPKe0Zz8B1FR+AjOBP48AF7LnrWhngLIiCwhLDAsMAS5ZWq8AOlkhqxlgZgOnVeEgDzCp1hAQPioFNpXsPSB+kdrXcgZgnlz0U03roM0stBojh1QkgEql7dCJX4BUsGoB+LRezFT9MYzMAmIEGAFYFeEZ1gA18FQS8zqItWCjm/rpE2RfM1o//eXhFaQfOlz5IysqKir6MDXU4S/UG1IdLaADRrqndqTe1uz+YmOWfmuZsY54czxu77891cf+xQHFYz2//QRklS1KwKljpIDmxkgBx29GCjgQHXPtT+8mwJ70bgE0X4wUsC+9rwEH0rPM/el9Adif3heAL1bOk5N+ANe3HG9zdu5AAAAAAElFTkSuQmCC", "reo_emoji_haeremai": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEVckDsAAAD8/fuoxJdomUmGrW2Os3i0zaXh69vF2Lp0oVjm7uFbkDrX5M9akjhbkTmZuoVajjZbkDpbkDp9p2NZjjpbkDq70a1akTihv47M3MIA/wBiiTuAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB7ly/aAAAAgHRSTlP+AP////////////+v/xxK/xWT0/8wdP84//8BDQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALq3mGwAAAIaSURBVHja7ZmLbuowDIade+/0QiljO+//msd2Sls2OiYNT5qWXwJaJ/2/xA4gJaCEBQmQAAmQAAnwiwDjqRrgiRqq03kD6CoQUNVdAQcQ0iECxPwBzgRoQFANAipJQKVgBFGN0MsCTjDIAoTtk5KSkpL+vKyzsv5a6w3BhEB3RQitDCCLd07r/FlTKEwBuwBnzJxBZ4Jx1N17fISmeY2wiXdgDd3aNvg4cm9is/d+D+BKTaJuga8C5hA78KSXCGdWl5a7WnrEYKTl5gzN8GMHUGBTXXO7p8748gQwFFojEaAZeJnY17J/XvIwPwBmIWAqcSwXrQvArkcqV01Wdd6GTWQGZK7gORTY0oLLsTl67wNQRxN44pSMQJdkVc5rY47MgJzzmPO14aqF6T4Ai+LNtWsswnHBcjKIvEZmgNm8B7D50rxfA+ppYYozuNBascv4NpEV8LICLpQncvsMkNMC8lzIkt5sprMlAWvkLqAkH/N4BrrWLTkRhhbgtADWyF0ALb6sDuS2D7DZnP+X6IcxuwDWyF2Ao8FZQyvwFnD7M+L9+ivitjc7kZtnXfojSUpKSvqVqqTtT9IbUo0soAMluqfW/8S2pvjGrPzWslKN8OY46vz0UvfjgwOK9+v56ScgH6olCRgaJQqo3pQooP+nRAEHoWOuq/+oRAHfKe9XAPHLKAfoX5Uo4CB6lvn98j4ADJ2SBXTpPHnWf9HKHK5BI7W4AAAAAElFTkSuQmCC", "reo_emoji_aue": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXzkAwAAAD+/vz3s1j96M75yoz72Kn2q0j4umn1pDnzjwv1myT5jAX2kgj0jgrzjwv0kAv5wXj60pzzkAv1kAr0kAvzkAv0kAvzjwvzjwz84Lz+8N30jwv2jwn//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFchIUAAAAgHRSTlP+AP//////////8f8SHDKvSP//rjdzktKU1P//dVQBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJftbCwAAAINSURBVHja7ZnbcoMgEIYXQRBFjdGYU9v3f8wqp6JpE+xkO80M/4UTibvf8nO4ACDIggRIgARIgAR4IUBz6I/wRJ3btyEAqBYQ1CoH2JWAonJnADvAUjnMgBrwVNYToEUEQEugAVQ1MOICDnDEBZyhhKSkpKR/KplryU1BOiT220wr3wRgUwSL/Nbkj/58M0BYQHbHI1nkHV208CmAxzvEufeI+9JmqM4qmKlgH0TtV+8PHKJ0fv4AoK6LYcl59KgJk3p+im8BUue+6mfhw4rF2z3tTWUX1+UbgG6QdrL5MOr8i3KoA+hc+A3A9425H67jItqhCqByedYAYcZoEg9dqUzYY/l8zHrkGyoDKLJQedjzaIe4qy+zY6IBcg24MsaKrQC6qG+23I9lEQB+v9HxJYDbvNJ6NgGkX+SU58Gw0ryoYvchppWZUnWfmJCXzM7E+Y+rsJZ1i8BIh4qvpeOmpe6NMO/WRVOAK1pmWdRC4GEd1qPO7X0W4BvCWRoLWGzTzNI6m0usNzsWJLxs3uADVTcDOLXkq3IFpZCUlJSU9KJqcdP38IZ9IFXjAhSQE2b+cT7WxDzzqpEPZpu/OVompO5RZqgKjveH8dm9ODUPLijW8/npNyDL/ANBBZxrggowVxl4gFERTICezJiAhqACjjVBBfSKoAJOHwQV8I56l6n3WkzAURFcgEr3yVafID0aCTBtE0oAAAAASUVORK5CYII=", "reo_emoji_ahatehuru": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUiZpkAAAD8/f5rmLrK2uZVibCXt8+ux9l9pMM4daJEfajX5O1ekLWEqcbj7PIhZZgbZJkgZZohZpggZZghZZi90eEhZZgeZZkhZZqiv9QcVY4wcJ8AAP8AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB6H5iAAAAgHRSTlP+AP////////////////+vGTVKk9P/dDIe/wn/AQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG/+9QUAAAKCSURBVHja7ZnbcuMgDIYxEmDH61PObbfv/5qVZLzFScfOJtZFZ/gvPEGx+QCBxIAplGUyIAMyIAMy4BcBhnN3NBvq2J2HBNB3RkFdPwH2Rkn7EaBWvzEDA65GUT0BOk1AV5jBqOpiDrqAsznqApSrz8rKelZ/rPWbVLSzUf4XAxBYbiwDskEAjUOLO7K50Fr0zwNCUvRjd0AA/Ksm5mgLTwNqTyqlVFHJOWovA4IvhUV9gupk7Ws+wFiGnXHWtgwgE3WioeECQ6Nlqw16QMONwotOBn5WHlu2uQ18IC7n1kaA42dt29L5FwDJLGp4zJ2dAQRClOcBySThCYO1nwEqtrXNNgCeMRbK+RDx1GUMbLLw4IdqHOxycM56QPgfwWy3uiIA3fMAz4GpWXnnftE8DpDAt7isG6qs5qxF2av2CYDaxhEU+b8SqZcByypYSCyk0FTNcj59kyaUMXvVE6B+G3NZKUFBoidaT+AyscSlvTxGHHqDd46zF0xtofSLEDjLzAAEreEWQPG8Xcw+IB9QbRSlMXYB5XPOZTOA4G8A9Pnpw6wDMIbRNnEyP+eA6h4Q/uXXZcBJejDtV74BIAN8ioD4/mQZg6tb3xYGYE/wQNX+BuDYEZACEotMclzbwXCOso1kKkwyzfQcd0YJILHEr9dyj5e1WIkXQnULAMlvKeDbwqJNwMf65hnG0YQfp5tzixaXQ3eWypmUdvVn7QOpqy6gN4XqmdqBTh177WNN9YNZ/aNl/cNx0mVzVx+GlQuK2/m8+Q3Inbc0AcdroQoYvaUHOHwWqoC90jXXVP+lUAUc+0IV0L0XqoDD30IVsFe9y3xl9T4EeN29K4D3It8nj/oCfW0en2n5I1sAAAAASUVORK5CYII=", "reo_emoji_maitairoa": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEU9cRwAAAD8/fxHeSiZtIizx6Z6nWODpW9jjUhvlVbO28ZXhDrE1Lra5NOqwJvm7eI9cRw7cRqju5M8cBs7cho9cRw9cRw9cRzh6dxAbRtdiEF+oWg3axcAgAA9bxy+0LMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADA7+SpAAAAgHRSTlP+AP//////////////////rzL/SRiS03T/HP//EgIu/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGbuTJYAAAJESURBVHja7ZnrjqMwDIWNAyHcLwV6m915/7dc29BCC9pO1Xo0I+VILTf5fNhO+JFAoCzwAA/wAA/wgF8EaPb1AG/UUO//LgBdDQqquwtgB0rajQA1fyFA8AGK6ghQawLqABpQVQO9LmAPgy5A2d7Ly8vLy+vHyOX56e6Wsdac08g8Z5RZa7MpfDwZFSKG/HRh5xCzHDF5DkBGmPNJi2J5fd22Je8SFwCDaFwZwvMAcakmQBKGyZiZcXGFMeeQxWFCB0Rw1o7ZWAdx666P5sA1oBLjBAXg+ICpgRjRRnJhzEGOJ0hzoFsSFmFEKVuTy6MY5sA14BBhwRFlRYAUscw5ggEhsYvCkFNExtFofAWQX0L5p3ySzYEbAII7qm8mGZQx1zoSANePCxS2ADlWt4BD6ji3QpJfBG6UCAosY0xBSmX5PehiAQDXSrFuATKaRkf5vwRuNJl/OSWHU4lscQvgEsWfK4BZAMo5cAtgxpFEAMdVdNcM6C+0krgpNgEpHywFzYFbACowvwm5UR+KqOCuC0CGxolaHVVTte4AVP6qpBgzB24CyM0JgFF45r4IgH3wxFOlTXiorABw5umTG5gDHymxN0PZJAnPquw/35rLPLPGf8G9vLy8fp9qbfu99oLUURfQQaC6ptbTqqNqCkflhdnme5aWg+CovDjOy/tvb3XfPNiguB/Pb98BWXVLEzA0gSqg/ghUAf2fQBWwU9rmer29XwIMXaAKeKm9XwD0mluNr7f3IaDR3Sx9vb0PAJ3fT570DydWHqQ1GUfhAAAAAElFTkSuQmCC", "reo_emoji_uareva": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUafokAAAD9/v7Q5Ocph5FnqbCZxsuz1NhMmqOjy9Dh7vB2sbiJvMIXeYwafokafolaoqoafokZgIkcgIpClZ7D3eAYfYoUgIcZgIoafokZgIk8kpsafoqDub8AAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADdg3rdAAAAgHRSTlP+AP//////////////F6+Q/9My////NxZOQ3L/cv8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOSSYfgAAAIPSURBVHja7ZnZcsMgDEWF2GJjvGZruvz/ZxaBnUlx0nQmUaed4T4EYl90QAp5ABDMggIogAIogAL4R4Dx1A7wRA3t23gB8C0wqPUL4AhMekmAF2DTngAeGHUIgJYT0AoYgVV76HgBHQy8AObwRUVFRUVFK2213lKrtN48FqmfI2WqEA21GlE+BpCIDTfA3Qc4DG21JMtKoyyigqkJw2urwElpKR2xycyI/V2AwaR5UI22Cd+ii7SDDRKPfDY3V+febQANd9rOjyJAEiC8xMaFrg6PwgelQ+dmE9HfA1RvmtjdLQAptVKwi1HVPO2Keqhys6Ol3q2BchXNWS6A9MMIrQyaFynJbFdmfR0QZ5T4FlTA1dJeAmJaMQFiZWnyhlaUm7ex/CuFwHJKvwEDTVzOZgWQqd2oNCMtKd25Ob1eidIpjaGlblO+1HoFIehOUSwbI9rYyczTjY1GE0kKY95DU6Orl2wuAFXPHpfyFWuemRWey51Jp9EmLFDRQhrKyFdAnCjOM4x7Ym2ebuzk9IfXv6b8Tb1+ve658meYm6/XoKioqKjoL6vlDn/iBZzA8wI8CNYzte43jjXZD2YZj5aPy+H4gflwPGj/9FJ3450Lisz/9vQbkK/xR8EKGLxgBbResAK6g2AFHJmuuS42IydgOAhWwEPl/QGg+xCsgCPrXeYju/dHgMELXoAv98mzPgHMnBwZtXqLmQAAAABJRU5ErkJggg==", "reo_emoji_aroha": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXcLUMAAAD+/v7cLUPcLUPdLULcLUPcLUPdLELpeIb41Nn75+neNkvgRFj63eDjV2nmaXnrhpPwpa7kK0H0usH1xcvumaTdKkPnKTnkGzbgK0PbJDv/AEriTmHytLz/AAD/MzPocH/ulJ8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcZl3XAAAAgHRSTlP+AP+PrlHOcC7/////////////Fv///xYQCSgTA///AQX//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM1bcDoAAANsSURBVHja7ZrnkuMgDIBlisFtjUuctvXe/yEPsOO4QIJjmLmbWf2IG+gDia5AFFjgF/BvAs6UMkwIwZjx5nH+I2dYJ2WUnt0AJ0ZgKjHjNu0cx7OkhF2fAug8y8CgJvVuSecAbspjRjBLSiDcCrhisEvMnUqiBJ/MAA6PhToUf10YcM2kSnZLip8mpWvA80w3whdxSMqWABf9A4E4JWVzgJt+nc01KZ0CKLgKdU/K74AjhJC4GQEkCKD3GGwy0Ea5DIA4FID0gGAV0H6GgBXQXoDoAgHlXQJwSACVgDgkAEdwDKkf4ghoUACcgIUFcMBhAQzIfw7AoQEkPACHNlHwVhS4o1HgoTtaFBYQejSNX50P2jQVjsO1ZUoWqZTKmvENocR1wmmMXz6RlHQ34Gib9HOkpRifS22RsurEHVD+qT6G+lZdUhhdoACmGSFB6FAj1MnbQl7KDCGpPlXQLOkBolZPiqe+SmmNa2Uw72xahCrR20gC6oPMDyUaJNGASt8fdILx/UIa28pOWahQPx89QKJSkJRDWcj7LFeAQ5ek2oqSlAn1vjVYSAOYyUJvoDR2GpAd8h5a9hehAJ992dWrRP5UhjbBBsDJZKH6lqcYKq+u6luqHpWJ5H2mP+VVq72QLdWcb8t3bLBQW9ef2kbF0JrUNZ8AkrExSe1pXa0B4/J9tXpM0CjdqHgwkSq1mAFaXZtkDbhvQJY7EJklUz1ZFW0EKJe8iXx08ghIFUBkKwCZ7NH4ykJ6lFAN82MELJrptAbqZbYE8OkukywtpFUqc3Qj4NbRfgBWPpAFSvs2sKjADeA47ZRCGAbRXIjCtskcN+IkyA5wAvC+yL4uzyqY753H6rQl9r2/XAK8Li8a04EUC2Cg+ZEa8W+gOaDxBTjbTh2pt/297VjTy0qYPTg3fY/9OmB98ru/Q8fnx0fL3KsDTIfj1K9+w+k789TD7PED4qsBWQMUZO8c8AzwTvzpN4dYvok3/bYgEfGl3wbYbiW8NcyFd7efZ3E0tq/9OwTq6I7+6xYJdB2X4uOrocar0+hNTq/HMr/xDve6BUufOSK+7I3GNg/NRJr94d4v9krr3BRPtsUVH3t3U8CavVh894h4sxqb8NlzyH0ePSaXyH9M/45wV7/xTwOUGCLSfv+VwDE+Rb//q/gFzOUvVuYkuMEoKB4AAAAASUVORK5CYII=", "reo_emoji_securite": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEV3slX+/v4AAACHumnW58ynzZG416Z2sVSTwXh2s1ObxoPl8N53slTJ4Lt2slTF3bau0Jl2slR2sVR3sVTh7toAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD0lgauAAAAgHRSTlP+/wD/////qv8u//9I/x7//3WP0/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABD672kAAAGaSURBVHja7VrblsIgDEwKhFLs3f//1lW7HitW9oFMd93TeehbZw4jJFMMVTeE0c+kiNmPYWGm66PzBIDv7gInAuG0CMD4bwpUdQREdxHwSAFfUSAoAk1YgYlmrACY/sCBPwV3ZmZbw/gtL2jB/JdFQPiFH2gA/GbFD1mCXQuwPv/wxM8GahBiBc8GcVQ/YckCHNggBhvE2sWiSfjVSwXaoDbh164TdcJv0QZpH+J+Z4P6T9tBsnONUN9BEbyDPt4gCzYo7TICNigeBv0zg5pyg0wjzgCLaJttH31pTjH541/eZWy+wBQb5PKvS3GQs9ktaMrbcL6PxPI2HHNZRxRyShoG1woqXca9CDx+SKuSU14F7k4MOkHObCg41Ta8pTCoFtEtBVH92NtS6FVzion8E4xy12L1IJdXOAM6r/7XcPueXzABWtWgzdqgn1Mc0qD3CtCUpX+fUjM46eKv5BIFQwS9FwXdTVugQU9HzhIOTkRqOnDgd+DR9CNWYMT/5Q4fGqigSwjgwY2wz+gJfnjmOv6jPl4xfY//fAHO2wuESNS7+wAAAABJRU5ErkJggg==", "reo_emoji_aide": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXcLUP+/v4AAADeOE31xcvmZ3fgRVjjVmj75+nxqLHrh5P41NnpeYfumaT0usLysrrcLUPdLELiTmH53eHeLULtkp3dKkTdLkPdLUPcLUPocH/cLD7iLEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7TUcFAAAAgHRSTlP+/wD/////////////////qjD//0n/HnWP0/8dIwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO5O5YUAAALRSURBVHja7ZrJciMhDIYh7PTqdrxl5v2fc9xxu8Ui5GQqzGGK/5CDgU8sklBXYG+fOlzmG/tB3ebL4UFm65/zzCpoPj8NvLNKen8YqMZn7LAa+MUq6nw3MNc0ML+xA6uqA7vWNXBlt7oGKuObmpqampr+Rxk/dpZzK53XWLvo3dhx3o1Oib8A9PexIGlSuo/b/TcBQvJEMaG3abtVMWAkATobz3kAEB1HJMXXAUdsPDl6VSfIGXRgQKLjX/EDCyMJYB9os6WWF69SkQDGgvVZuU/3hMzu7qKfrpqcZAjoMgDTe+u4uq9Qbu3jtlYPg92y+buD30wOYBtgP6F+B8Cxmr3VYl6hok2iAYwNz/YFic4+misEbfjzgHYB7QvGEsARmX9kWL4A3DU923skvTzbprRld20NBvyLFXCX5agTYEqme9giBJD4CZe9QOfZ5cPsvjYKELvplihhGiLz6XzhlgIUMoVUqW1F+BcFSH0OQlbFLYI4f00AMmdPkrHK8hbLt88QgDwyQUcRbUOucPtKAJiOQ1Ol+qoBJoYcMFKX7sPDqTMQSYJAAWnZIJOErok0ZfIYzAFIaRJ2MYzIIvj5pABEGo7jtF8lrhxoHQlANUCGG8qLfXYaCIAr1HjgR6q4R54IcpZXJngek+AqVhR8CL0ELG1AB5fAULgQJLFDEeARyN6H9ewYDIaZOvSSeiyAAMBspm0zxRRd8xChcnd4DSE1IACX1AlwX8hB+SmJk7DumtQihPkYk3xTBHCqcNwXaDghUy4c0x0ql36+zPc0QKSXPjK70nURBsfwAlCong155X0LYJDqvlsK6QUrURYEYKNE16fbOKTxaZIeyTdYBnApQA9Qd0uPhb+GC6VDviJfA9ZOapUof+nqxZhFE+2vAE1NTU1NTU0lzbXxl7oGLvX/5V790cBb1SX8/hcPN+o/Pan/eGZ9/vPjzyuu2/OfP1S0GmCTFUAOAAAAAElFTkSuQmCC", "reo_emoji_eau": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUAAABcrOtXq/NcrOtcrOxcre1crOxcrOtcrOtUtfNgv/9bsO1gqvSA//9mzP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACIstn4AAAAgHRSTlMA/hHNUDBukqwPCCcYAgUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEnjkuEAAAGrSURBVHja7VmLbsQwCCsQEtK72/9/7u2hSpvW9gLBUqXNH4BFbEggy/KPZLw1MEGlAo3fiWhFErR3AuQhKX1AcQTySSCw+IW+gNKZaQOjLLqhwSy6QVEW3SAwi26oKIvidC4/45PBLArSuf4ikI6yKERn2yHI1Fn34mfqLLsEeU2v0AFWlEWTm149JMgphvtx/JymZycEGTornYJRFk3TudALKMqiSTq3lwRzTe9OA2CURROantIQFGXR6cut0CAqyqKTOrdxAoNZdKbpmYcgcLmpK36g6YmPwF0M1Rnf2/SY3Cgoi4aKIZCAT+dIAp4UQgl4UrAYAd2wCYynUKME9MAUsbcWbuH4g207fkJEUA8N+0gmCGpwZE01qs4QWOZjJXorTBEQ2KXXICiXJhC0TeUKhQZvFVPNTtHtel2wKts1rsyJM2Lws8WwL0fHjMDgBKKlUGADWmCWjRipQ2dA96jckfNNRAZ7LLBdS3ij4xBaGLsvEsau1Cy+FuxG4L3m62OS2e11P22tkvHNwscUNekniute52ipP+Nav+strSK+lFlLKarcl7+EJ9o3EfBZyKyMAAAAAElFTkSuQmCC", "reo_emoji_cyclone": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUAAABUq+1Uq+1SrO9Tq/NUq+1Uq+1Tq+5Uq+1JtfYA//8zzP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADXDYQ5AAAAgHRSTlMA/tAuE5CvTGwPAQUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPOSLPIAAAOBSURBVHjazVrpcmshCI4gi+n7v+/N6W0nrggmmSn/Os0B2T4QvN3+CBW8qOT3c85CDOlJQIpvY47KaUos5Q3cCZJBrC/JKGpy/0907JGsyUdnIgolP8VF3DXFSIKuhRQljiih6YTcSuR52DOpPLL4lhFlnhlOJXD8EnRMqVn6gUeCjCGC6yyMS5ABDsxvMgUldPxhj2jIEQkdf3V5TfwSWv9yOUp6uK8NepybjRK6/BnvNEUl4gfRo9y06uU69VeOI5P/UBigCd9aAu/VhOIrDJWMWsLUSGXNHw3kfuZJLSHbBmrts4CmMVeqGCRbgWJDx2iorwGEixVBEjh+o0RlJDVSjFbRt68FTy6w9kDtYIxWG1rmAs/+g5F6hq0neaUBHfL/CU1eRWoebVeChZ/bmNN5ncc5crjomyUs8UIudCnHBvo93TMXdhh/0LdclQBNuLi9YKCfWL076wketV5cO4FMAXAk4IIg2lQFB8Jdl6c8b+608jJYAgyIe15pJmUC6rMdeaAtFTJJZ/QIYBsPDAnoi1Mb0axo1kpAibtYN63UFZvi0GBpoX1CssvJ1e+74+26wUcYOcCoKny8bya75vr5NzhuaF27hXvQAgOvJ590Nd9xYYSc9lgEz+OYSTATwOpA0+oMKWqiqkPGvQDtQFX3SclpH0SlOgP0UOaHLXZEKfYpJ4GkFIeA3OcpBHDXg9VlQKU+9Na9K91cPij2d0ZvZl2w6x8NHLj6UiDFXVwLkOlg50dEUT4d7UAV9/P+C9ohaprVZk/BJLv8H8+mmsZD0mED5uopHuh2P2nBNm1pbjTFlwxUlHic2bQ1g14wEM6TgtrOA44NVBZBhS1AS/wa0p9Ulr11fIyKs/6KlmVQohJw2tHoEu/APbAY3ckG9HEv2zfMbka/YmG3DMI9035Z3SLHxLtPbgQ7JdrJ9W4AVqnAv2PKL2vh0s2f61IEuw6btiWGxSqluJ2hkrmV4nF43pRScSwpaFzawXfzPV/XNecn11U5tD9pkgaK86p5uj8p7tu4Uwn1dy8DQEh8e4XBdYW9uCzCKcZ/AnLrlcVksIBHKyOeycBJkkM+3wle8f8LgijzhTCV15emAO/ZbR40LsHtbA52LhBf9wtE56cfEwF6vIFHR6NNr72FyPYbAtA3vIJY3mv4jQ85iihVKQBA8oG3KJfFHs9cPsP5L9I/B3UcwLSgZXwAAAAASUVORK5CYII=", "reo_emoji_medecin": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEUAAADYnYHpuabBaU/23NP/v4DVlnraoYbjsJnYnYHOhmvGdVrux7fZnYHYnYHKfGHZnYHZnYDYnYHam4PkpovXpYLjm4DjrZX/qqrcoIHdoX8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACL8PGjAAAAgHRSTlMA/v///wT//96x////bJL/TS3HFQsOENgDLB4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7TShoAAAL2SURBVHja1ZrLoqMgDEBFKwgUX33e+f8PHTszrRBiJRAXk1035xSSWAmtqv8iptE5N07XI9j3sZ/FO+Z+nHjxv7SAMTMqLr3AQv8w8UexFY6F78R29G05vxffYi6tqFaL7zE/2fhyaKxBdont+w/NEpI10+H+2JcAWYK4MO2/3VhB9ibB/JqFb9FET0z1I6XEK0kfUp+FWQj4ck/gyup/ye4ggs9WFu5R+1Bhcv3yfH1swBJuRH5X1ypssFUgG6Rcf8h8z2AAEFvBSOevhuUZFDSwQRraZfD9XdoNSjO/+OfTmWboad//fFoCMYBO9j72dH68hlf5DCAXkpgDj/9X4BvA0/RPuVpaFfn8U5TpJuwH45frlM33DAOygveWXfP5fj/Y4DfZWDtIwrNoi59SrWN6/SP8BMOl5PvHBmkkuc2+80PDAPpBiHsxPzBEj2vHwI/6wRdcOfiewYLXl5GH7/WDsX6WHRd/o1o1Hx816JaRjxiY+ZGBnQ8MB/ADwyF8z3AQ/2PY5z/qVVDXVMM+X6tVUNdUQwJfiLfhXFNDJfH/GXLikcbPNnSp/EwDgZ9lIPEzDEQ+2UDmEw0ZfJJhl1+h53fFx3f++9n62624+COYzljSGvb5V3Ag8o67ioMfDCiBYN+QwL9HAyybnukEPpiASmPC13BVyr/tHSO+GLqyEfSuoUuaIOvP4S3YmuVsZ3YMafwnPp2RwelX5fOrCT+wmyaoJpXN/6Tg20QAM6TyP10G56sWzJdUJn/tAhlNZeR2LaXzdy4aNgxdVR0gWA1dW3AVA+erJq5WEj9qZFA9Ju4HGv/TBxvzVdMEEwJF5oOHdTRfhQNk9SDfYCH3DSYcgfs50S3rhRv9/IvdSB7M33gnisat+XxYR8h8tYyPNzN8mpbw0SyY6DpAt6w3t7IBIzjdMt/dGtsMkotfPedD6tN/OZrZbjK2DJr1wo32yOD6I8OEL6K/VGwxxZnobxVrTM53aHepqgP+rfL6K8xhf4bhjt+URy/qGWK4HQAAAABJRU5ErkJggg==", "reo_emoji_non_ice": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXcLUMAAAD+/v7G4+zL1dyYqbTdNEr2y9Cw1eHdLELcLUPs6u3dLELcLUPcLUPcLUO2x8/od4bwprDjV2nKuMT41NmrucLmKEHumaPrh5TL3eTlaHjys7vdI0LPrrnGy9PjGzdmdX//AEzzKDTgRlqGmaP/AAD0vML53eGxqLO809zbJjvJsr3gKkPtkZ1sfYaBlZ+8aHnNSVzDW2zWaHjiTmF4i5Wet8G3c4O7kZ64m6aqtb3WcoLd8PX/MzMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3PHG+AAAAgHRSTlP+AP////////9S0P8zr3GM/////////xD//////w7//wn/Awr//wL/////Ff8s/////////////////////wUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFlqYxoAAASPSURBVHjazZppk9o8DIC1ceKQkAPCAuF6F1j2arvbu33v//+zSgiUWJYtJ3Rnqi+dzhI9I9mWZMlw5STr5yhP4xgOEsdpFiUrty+B/8k2yY+aVYnzZHs5YB2lYJE0ugxg1+7EsABWWQxOEmfbLoAMWkjWGhDF0EripBVgmkJryW/dARF0ksQR8H8OHSW7dwGsYugs8ZQHJHCRPHOACC6UxA6wbP7RsCyKhzBcFuVwJM2/i2wAk/5RGXqq9Jezr04E4P0jZ2OPlHAoeS8Bp18WnkVeJEcAZv/MPEZm1FdTCrAm9v+o77HyOCJCOAWgzq8cew5S2KIrMAvsRBjvzMtwArw17Dk3grfQgsYaAYzxuSshVwGWCCFDB/19/1+Dk8DqIFcb+r7vD7GT7hsAewagCf8JcfhXzOfzvf6+diKiM2DFREiKIGrpHeSNX8HQgYjPADaF6eug6O/15gdHScKECjDlozwmCKESam8tCRNAD9IjniAEItQA7KTkCEBBaBxKhiAEJhxj1lg/C6BF0eE+0NttEEIjnP6E9moNUJdYPlapxGaDEDrh54HQlhmwh+oEYCEIXU5LoJmQVoBnVcvjMR2avCQoaQRW7CNAe2j0M+HSNgjBEEZoHwGKo+cMTBNuOEKBEg9cqRqaRQPppWvOBLQIoG7ShdeN4Jl8dAVqJijVwke6EoxlRgLqKUAhhyf0vvdU/cjuCJQ1llrxxhHuNu8HQk0+6ipDTG5SZ0Kw2QToE+WLXItDLQm9D3f4C2WVU75QNO+l3odvA9X/erRAkboki2iTDYPN5r3PVKsIQFfSRsLd5o74eWnJjEst9VbJVlyThHeiFziWqkbAIAiC+d7b1+Q6PAnS4KUFgFzkB5W82RPeSfear3AHDIIjYe7/4U54QbVF8z8vlAVBMNhXbu4EtIti20G76UJA5yC1hoouBHSSc2uw60JQSyNQU7J+6Ru0JeBwndiPct+ftCSUKOFMreG0ulk0CQ7nQb1M3YJad0ldf5MwN0SN0JRv4n1VoaaEB11/g1BFDYZQovIX0P1vSOhXCUztvUPFKaDrh6T0NwmG6H0qF8a4aaEVvyWl/0yYM7U3Ufyi4lSS+n3/dB76VsJYa1mAdkkuSf3905m+Mea4ykvown9bX6HUzC/7pP5T1PA9CyHUuzqg9xG+0Prr6D2x5umv+j32cE9Gv/ub1r9PzgPfXgkYrrH4HiufaP0OtQZ9EddaCZ/+4fU7ELbnZgjul36e8PpZQtbotmjNhI8TXj9DiLfWhtSfE16/nZAwLbXaBq6taSaglhrRcanWgW+bGglrvq356cmhLWsiJC6NWfmX15WQUb1rorX85Ve2lsnmuL33XkXFIeWgFd3eJ9vvOyti1qa9b+xfDx9o7cu2AwrLCGdRoNUIywW0H7FYh0S7xX5KtAwfinK22EHHIdHrj7kuHtQl/KgxuWDUmE5dhqW33Yelv8m4t+vAet1u5A6vOnKvxmptHg3EWbdnD67qo/vXfLiRRxc9PZm+7tOT+lxE9OOZNEvuf8nrnIMhyfn5T1w//3H78OoHzkxOEp6bdpoAAAAASUVORK5CYII=", "reo_emoji_non_alcool": "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", "reo_emoji_non_cigarette": "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", "reo_emoji_non_vape": "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", "reo_emoji_non_violence": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEXcLUMAAAD+21z+/v7vlkXdNEb2s1Tzqk3dLELcLUP/9NDdLELcLUPcLUP/5o7cLUP6xlX/7azod4Xwpq/jWGnrh5T2yc7/3WfmKEHqfETumaP/4Xf75+r41NjmZ3fys7vdI0LjGzf/8Lv/AEzzKDTgRlr/AADtkp30vMLbJjvgKkPiTmHpdnrtiUj2vJL3x6/63eH/MzP6xHT5zIn50bMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACm0CloAAAAgHRSTlP+AP///////1LQ/zOvcf+M//////////8Q/////////w4J/wMK/wL//xUs////////Bf///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHlslLUAAATaSURBVHjazZrpcqM4EIA7CDC3zWFw8G3HSSZz7c7s+z/bAsZGV0sCT6qmfyUVSV/Ul6Ru4MlIjh/ePPJ96MT3o9gLD2YzQT/kHM77lVnx5+H5ccDRi0AhkfcYQL26EUMBOMQ+GIkfn6cAYhgh8WiA58Mo8cNRgFUEo2X+Yg7wYJKEhoB/5zBR4lcTwMGHyeKv9IAQHpIPHcCDByVUAxTOX2R1nr+X5T6vs8LBx3kqALZ+UZeElc1++dWIAHr9OMstkUqZOXotgW59JycKeXN0BND4z5JoZCmbtZIBjhL/LzZEK/8UkhQuA8ji19kSA8lV2RU0BjYibC+4GW6AL4jPmRHITkgaRw6A5mcdITilp4CQTMjeLECRIZwSWzpNksrqpApEbwppwBdVdhH30Cy97pe+SSIQ/FcKoD4BBkLQLm1JJRUI3gA4aDJkQ2hUnVSWSgjhAsIfANojzHEtraRk40i20AJW+ixvQKgI2Uu2AGKSLiYSiKCksAdwSWj7w5lEaKJhK8YCCFn0W2LNJu0hJUK8XQGsiZ3fzVh3yh7W7UEnmBl4DX3rBs+UhMWCWfn2ayBsIWoBH+wqv66DVVqa2TZNWNj2rI9mwQotgPWh4jZNoSX7tqJ149l3HXGOFDYANo/mlp6AASzx9IkbALsCGfIBqiUlgHBGANZJd4TKZRgBBQSijp6APQlqktznuZiWUEAqXjNCYKOgJOkwDSN8v6/IAZLuOsZGAjA2dpqU30+7/ptywjMC6NyIjbUYmDArmgHsNIwgBVSdlZkZ3EmQDYBW0wucIAVc3YixciReFNf3+LRd3JdmUkDnRky24DJ13fw94QDazEcBToIbcYD2Jp0yVjYgUIDOT2vFybgngxtR89QEamCCXFV1APUJRA3s/HSvAHSPDc6NrvpylNnbps5l5Q46QMVbuaU94wQe8MbdLehf3sjgRkxOc22cQAMC0Yt8PtBogE2dWiiBBqRiHER8qiAniZVbfWF2oMclYiTPuWQ3uBFt5c4giLfyAPZqBOyRvKHcaMG4UWsQffauxHQdmrmRafbmAzmEFaisPGMB+uwdcM+1F2DvXQ5m5ZtL6bJ3sOEu2MDdHN+JcOawP8sJ952mNXf9Be791+koFd1ogKkzX3rhLqfAPT86HfVWoK2sy63Q7+EnX7QQLr81RaAALqUuhZYqyeWXu5w6/XuyffK5VCDMbOoMQ7X0n1CyAOGRXA/P4U5OaSNJI+v1uqosd9bIM6KllCspvFyfUOzJ7yhLOK0tbCTzwY9SrOqAWEfIVJWJHoDk1q/iO7Z7J3PjShyQLJQE5BnLv2MVSqLu3q6W4KGlhALfgTWCcB6KIXy9FDVDYJkTYqrasjIuNibGBP+sLEjlDxNCTUntDSOkayMCV1KTVFwUJdlgkJ8Y4agva5pUZZsjWFO/VhVmnXIyIZbVriWl5exPlpalxXF17b198mUyBR3k5X1p+f2iRCzHlPfR+nX2Ll99P7ZBoWjh7HLOGmW9g/EtFmWT6LJrukT78j2vl7sLTGwSfX6b6+FGXahvNYYPtBqjlUmz9GV6s/QvafdObVgfx7Xc4VNb7m1bbcxHA3487bMH0+W918/8cGPuPfTpyepzPz25xoUn/3gmisPXP/J1TreRcPj8x79+/mM28el/2nVPbe6zgbwAAAAASUVORK5CYII=", "reo_emoji_protege": "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", "reo_emoji_parler": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABgFBMVEW83PMAAAAqZ5e83fS83PO83PO83PO+3fW83PO85/1llr2OuNc6dKKlyuW83fi84ffH4/xRh7Cbwd7////D2/g3cZ93pcjB3fhdkLefxOHB4PfQ//9Ce6aBrc2///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABbWWMXAAAAgHRSTlP+AP9N0Y+vLW4Q/////xQoDv//ARX//yX//yEF//8EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP+9H6YAAAKbSURBVHjazZrneqswDIblIY+GlZDunnP/l1lKKCEUg22ktN9PPYlevGXJIJgFfwrgbS9PDjgrNEbDRNoYVBUJwDoDQRln9wEUwpY0qkxAG+F9ENo2GdA4SJF2aYBE973cezwgw32PiAO0SkOmtIoA1Nnu+3lbbQEU7JRaBXgDu4UrgEoDgXQTAiggkl0GkPm/GQjg8D9twwiogVT1HGBp/V9HegB4DdSE9gZggFw4BThgkLoCLLCoGgGGB4DfAAVMeh4AmguAFwBbAwDOPcDwAfAL4IFRbQdwnADVATQnAAXUwCoBihdgIRyAlovGMvqnl0GAwCQtX6SUx8PM+lRIWTzNjIdj99OXACP0/Qd50cONtbgYP26MD8NPD8uRWAAwuJLytODqBvv9KbJYPnfWG9D10sQ6GuXEeByNhwTA+K3y8Wo8XQGTdj1Kudid62IH/CProlAnFUv/yhtkkz5Ni4RpGgLAa+9svqaO817rV18PfQ0ttOBuXZ7K2K2iPIXvbWC5NzvBC6iA80jutqJ7HJmsh351j7CFM/CqmUNHM8SmbIGFvVf4LioegL9eoRTzFUoIZL4EikZzzCDOizj4eSrB0l/P7pwMIb2N299JSJGNQx1OCr4RzFZdraU1/+9eca7dSMzafYnZ83ZqGQmzsouA/Bagj0mOZ8cAWMWl9/MWg3Y+tkCRMwRGJZRY0j8ebUqRKK2HtNksps0Bi+e/c2j03DWqOqNQV6/VZir/bK36khUis9SI2xWHXcVST+5/BnCRtatcgI/aXXYAfjRAW0EJOP9YoV6QApC4++eAZq1aRQEw9J8fDrzwTP4qYTrCxgpBDjDbZ8cugBvL8zwPN9RwMr0zvQx56/Z3pxohuJ6eeBbff/DxTI4+AQmrGoCR6c71AAAAAElFTkSuQmCC", "reo_av_bg_0": "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", "reo_av_bg_1": "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", "reo_av_bg_2": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUOfIYAAABf4NZZ2dAWho4xp6hNysQjlps7s7JCvLlGwb0pnaANe4YOfIYOeoUNfIUIgIIOfIYNe4UekJYPeYcAAP8QgIde4NYAVapW1tFg3NVa2tFg39YAbZIUg4wlm5sjl5tAuLha2tFe4NZg39UUgYpGxblMyMNd3dNe39Va2tJf4ddf4NVA/79g39UWho8amZkA//8nmZ0qmaEqoaE1qqo4r68toaQ7sbFAr69Cvb1EvbtQysVMyMNV1Kpe3tRa4dJd4Ndg379g39Rg4ddg4daA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADTnuUhAAAAgHRSTlP+AP7+/v/+/v7////RSi+uDG2L/xQBIM0DEA3PTAfZEEUwZ681RBbMS5SnZpAEgHQKAbkeHj9AvJcQG3AwkAY2EVIIYE2oAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIxKPcYAAAZ2SURBVHjaxZtnm6MqFIBNQMGu6dNndmZ7ub2Xvf3//6QLiAgKCiZh+LTPbODlwAFOM1g8Uwtm9quqgrVN5Qtc5KsyC5SWlXVenBW8q8vA2Mp6dxbwJl9lwUTLVnl1WvAhXwWWbZUfTgau6sCp1ZuTgDerwLnV1dHgmzqY1eqb48B5NgMKmaLlR4CL0hVJGkpDhOg/ymIm+CvHVYbrNEwisCQNgCgJEfxiOwf88w/QSVYUM2bXQIS/rtzB/yxBklqjYdjHNmx87wi+fMv6xcgKPZS2Q/945wK+3PNuIIQ24nZYwFv3h9d39uBXr0VPkEwKDRMgoFGCQ9JwTLSsHeLqJ1twdQtD3I02LjSEaftDAoVQrH6IIz7E1Ss78CZr1q/tN7bTEBEJObY/QfJ/fIirCxvwJhNbx/uByCQ0/UlEFUv/E4JuFnx/MQ2upEuS9GuPBTKMS5lkOzEyzCxttmx/OQWusr5E7WXQR8OUr2SC4hE1gM2vHj9OgPu3cyc0wGHHprojVACOa18j9ON/o+Bct43SHRiGKSKvQKexdHenzvmazfHTGHin6ydfS/SoRtL9APS7r9HB5fKzGVxlI/109yGIQ7vrnJ4sVcEUsNHIQWECjsDyQ/3OBM7H9knaVr63Dliuj7/owZvJjpjewGybY1nF7d/sb7Tg0sLGYCqdUtNmlglY6sBF4KHlGnDpA5wdBmAvAhN7ewAu/YCzqgf2JHC3yy048wXOtgo4DwLPIgeeBSYiy+Ai8NgKCbzyCV514G3mE9yoV+BZtYR6BR4vD2WtKXjbc62PG9ZihBZctO9t3Dy31KibRSdmRvtiJ2O22I6DqedPbFDh5HG4I5taZuoQiWn6NQeXQRgBMLCogAuauKqaIQy+T9mAt2jYx8E7NmE5WhtVqBj4weTN047IyniNgHmEGGovLwL+WzEdcayMYrHeEANFxv4QGlejZuBPAyu582zpXNYT4FRycYQq02gMME5+xcD/Mmzal0N0BOHoCUJpGxBAfW9NzD5CA+0i4D3VIt3OiWhEYo4IxERztdheVEFV04yBjecGpuJU6tWb/ICdO3PMAOJ2CDWIQ8F/RWbNFeutC/5AviRRqNXcvsYDvIbSeQoWd3DUqxb9yImE8o0s/OYpxxwDKYoDO/CE9QGFd0z0PoW8pdJf8dR5S6UjgllgF+6mwexWUo5pLN+v5oiQ9oSwHkkc/0rAuc3FBIz30tr6AZE7PlmBSb9EhyZY5PR2dV2v7cBN6EZlA2Ab21WeTVcwiwnwR5775tjZM2c3cdPeWCiXMmkWl50VDhBhBTJElDy4gU9p1Af62Na5G71AqucCH54DfKCvU+af2zyLpX9wYwis/IMb06f2D84ZuHiOY0zB1XOcJu7C+Nct4bR5bbXipnoOv1BwpbrVxw47PUSlhiLYk4XjGJNcy7xnjxiB9NVjI6RmfCkHX9ZN+F2kWuIwhc5PbRzxIXhe1TD9LviyRcM8i2POQeTdFMdRa6VI4abFb3qvOraVmqTMtS4yRY8F2BZPBus1wnbWKzZ65hq7Ww4pLkRqPkoieRCLBJ7ImHZZc8Xi79vAShB1cd1kDhHJr5BMC82Xd7nMqeVG3W+pQqE18ZmRmn2ExrDx4gojyZkjVR2tT6b3fOVDm4rxpawQJAJg3eR7gfLFPRzkmAR6xD0iVnocCqw2sd14uUJN8+lkiOhndlVIopXsKTCl1LvtF679IBmivbCJdzwmdBNpILphiGbJNSJtnC+3THhBIfTgRDJ/hKXq4cj1KOIGTZyvtE7xdUIrscl15z+COIB2hTEE/eCQ1Fxj+YwSv4k6P53fNxb/6E9++VabTd3NKOWxCgh0O3bplriGStCwF2WFgX3907Vzqh7KUrtjOfqda3ECf+Nj0L/93V7s2y8dyzGke7RRK/pUz8iZF24FKMNMx8x8Se1WcnPi/JptkdEJbfhqqqxql501UT5SSHYOcraxKZ07A7myLBbMzi6voTxyU55Vr0YKQm9OSC4PLiWw25O5rvXWsei3OGVBgFOZc3WC5S43cwq7j1/u2lspu1RDT8Qt/BXvSzX0ty+P+1zB4eMMpYb+xe9Hf6Bhh1Zr6F9c+PokRamht8DafoRT5aVtDf3jm48n/uyozqZr6Pfv/zjHh1aV/pMnXkO///DnxeKcn5bVKp065vsP75/8fEy3KfKmvbz//rtvvX7Fd3T7H6/CUJGpJ3AlAAAAAElFTkSuQmCC", "reo_av_bg_3": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAADyl1ruiFr1pFv3t2T4x23qe1r61XT2rWDthlr63Hf//wDpdlnzm1n613XpelrygVHrd1rpd1npd1ruilrthVr7x2rpd1rpd1rsgmH4xmz92HT613X62Xb/gIDznFv2nGD3t2X3tGP5yW7ui1n2plz51HT/1ID/v4Dth1vuiFrxk1rxlFr/qlX1rGD5yG773Hjxk1vxlFv1pVz/vWb4u2b4vGjbbUnfgGD/AAD/VVXtbVv2pVn1oVz1oVv3q2D3rmD4u2b4x23/4Xj/kkn2ol33rWD3tWL4xGv//4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADP7ReCAAAAgHRSTlMA/v7+/v7+/v/TRQEtLmjRDhZOc0mvEZGwDs8TNMsCSxJV0q8rqLIGBGyCZqwDMG6QiNRqCS6pBwgBAw4sgNBAjJQmEQdY3mCUAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFX/LpYAAAMBSURBVHja5ZtpU+owFIbb9BJtK12BFlpUQBBRVsV9967//w9dLTuULmlyMg4Pw/jxmZO8NM7JqSB8Mx7MgwDzAcp4YDmujlfQXds6YCu1XbwV12YjNy1HxzHojmXQtd5bDk6IY91T05ZtnArbpLPGDk4NBfWNjYmwb7J5LR0ToltZfj4uzoBL+vO6s3FG7DuiULk4My5ByCxMhbQ7fetgSji3qR4ZOqaGXk7uNSh605gNGVNFT3hymDJGdD+ymaxeRB05Qc1lBt5Pc+w+G0XEhGJMzYeMvJ/mw0hxBzGjE+UtIIacRASLpTcqYEWmYlTc5j1DjDkL954g5hg8FnrrYhcQAIVN708ZQix34ZO1JV+GDCPeOKcKCIi1XVZlKLGs8il4vWQZTiwDP7TCT6kOpHjpYFZHkOKleBUQKIt4FUVRROIEgL/D+UqLwMwzDS2e5focWnw+FV9Aiy84bbEoTv65z8OL83y2eLbJQ3jxkE+2ZukawYtHgVjkwJf3mIf4mKc4z0Oc5yk+2inx0U6Kdy/VeW5PLkmUJOjvl7grcSDoSDzDe5+DY7EJL24G4id48VMgvoQX/wrEj/Dix0lXHl487dY3+WSLwyZfTsU9aHFvdvXCaYvBN7k574G87EuQn5dFu0naB+T3UjfzFVL8utTZ6/0ApLfczKzDeesr3dsanLi22igHK7m+2igX/vApWBDaQCXX2+vXMDU+BUMF+zrkim8MIR6HXS6+sfe+hd6mltiLS+EXyDUOyZpwDZ+sCVeVHEMqpe1jEWOW4veoQZA+O28/euamwcr7N2bIqM3I3PgXN97EJmCVq/iBrlIFNtAL3umLS8mG9mjXXEnoFQSPasIaib10zY1umlFUldqTpK+mnL71c7m9XPavn37c2GvtZablkQxYq1pWr0Y6yu5nKrrlC+QoVVJtVcn22sAp4Xprp5nflCBRU9CSqClpg1NaSRyzltKm+wLQh5YgZ1Xtg8UrT54yiJBXB4onMMTXNu3VgeYLIHi+Msf3hG/Ff6tyrSgUnQiRAAAAAElFTkSuQmCC", "reo_av_bg_4": "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", "reo_av_face_0": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAAD+21z/rDPBaU5mIRP7xk32u0r/tDr/rDH/qzD/qzL/qzLgo1X/qzL/qzKQVif/rC63hDn/21zUmk3/tyj/3Fz/3Fv/21z/5FfJelDQhlF8PR6ncDH/21z/3Vj/21zfoVX/qhz/yCz/32AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC7y4VUAAAAgHRSTlMA/v7///7//k8wjbD/ym3/F/9r/w5OLdUN/////6kXi/8JFxAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEr0PUcAAAMFSURBVHja7Zpb26IgEICFAhTSr/XUYbf6dvf//8e1MvOAGDNQF8t712OPrwPDgGAUBQKBQCAQCAQCgY+RxFKq9IpSMkve4tzGUtExyrs8mUpbUrn1py0lNeFNndAlnKvLpmNT+gqydKiNFbXAWZrFKbVDfkZ7TXB8T5eKgki8p/EcGa6ZKf2IGePFmHFeSuO39y8uw0q0l6agIpbixaBKklEX2Df21omXKmuxdCO2Djlx5LUOeS5g7jvkOS8RfhN7rmYRQqxDdtHSrBEzr22tLx6CEIA5Q3fx3WttVtgy/fA2CF+dvDV7LYPeosrHwNvAvUzLsTafR7BJg3OBza54IdzOPVQJ3dNYibNxvTLAei6h7QQJjZiRJRjvPyJzJObkFdq47z+ciAV5Edb7N7SCxMN54VXE8+/AiBObDh6a2bTCSEjlEsQK1j2ogM0SsIBvg2taVDPItEjAwN5kpNVQ0sJBK4FspqUZn68hutFlOzt1aT262dd6/VPf65orsEWXNqeLdcMvnVd3pXtzsxIrnfjH9fZfOrHuigAt6TNdbsHEkIU1w4g5aF+gxIsZ7B0mdSaGvLW5EKcRYMeHYYYTg206JbrCZVVAGHAzQjs3WZTMhxi06YOYIx5i+00Q5UYcg7abBF78G7ShiBerCLTRZRDzzQ2+IIbsZirTyqdYtRyNi900Am4az9511cFMYtjGsWmR+RRzw2oPFPAt5Nm7Hh/eg6mLoTvlypBdmxZmWGWqCHpei1xXJ4jDH44YxbhjGKhYwBv6bmbQlk6Rh6p7XTMaf7aphT5dvEzyuRlDva5nzcgqpgHjj3L/amtH0apZoa0iwsURcjVqxK50FEVXRr5Hje/m0Pw0vOthNWXUzX/cHJjvd/qQn2yG3trVUf151JDHofYw6uHK3bcJNZlXj7UuvZME661AJoM4d/sZSP1qxaoix9S7z3ib3D4ta3dnLx/6VEtB55EvcpP2co78sZ9VX/aRZ3QNvsu9a28Jnp968t0pr6M3Uld5Q1Xvo0AgEPhf+AcZTDMbYhEu7gAAAABJRU5ErkJggg==", "reo_av_face_1": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAAD23c0oLjLBaU9mIRMmLDAoLjLao44nLTEnLjIoLjLoyLckKC2OVkcnLjJuamfOt6ummpHaxbcyNzp5c2+zhXZISUrmuqiDe3f33c723c2zpJr33s5YV1bOh2/43s//5tOLgnyUioPQm4j23c0+QUN7PS+bkIikcWK8q6HKfWX44c0cHBwbLS1gXl3/3tX/4+M8PkFkYV/GdFvUk3323c334M4gMDAoMDB6b2TAr6XhrpvkzsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADLphw3AAAAgHRSTlMA/v7//zDN/1FwrP4U/5L///z/////////a9D/T/z/NhL///+N////////KQkP/w8J/////65GECAX////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMEFSVoAAAN0SURBVHja7Zppf6IwEMZJFAS0KMdi8ahn66q9rz2//+daD6AYEjSTRF9snnf9Af6bzMzDJMEwtLS0tLS0tLS0tLQuJtP2PNfaynU9xzwLs2V7LiblKoebZWgqy2kpHK2Hq+SqGraJj8lrKYishU+RI5XqnAbdx9pWn0+sUEuZ7xYvdisJSeZgkESn+8HC+BJkE8wVy24Ti8i5EBc+26JcaG63hLnYAoFdcTAozDaWIX4Lu5fCxe65DEs4vyQNePN+ljTgNjf5Bx+YYZVt9KI2sVne0UEdtbXssAaM0FJpRdHNI0Zb+Srnmhri22AHRv1QWSnTbTrlIhTEqoL8k/J8uERfuuYhPwglddxBRQWREvMqvyAiRCqYDsk5iYahYD9gVw83Z/vtmMi+322htHbK5ctS4EfxQb0FbQG7PgRP0BE1+1FYiIgPB9unjvdLy2HqqRt1QmghF8FDdKKmW9wjKpOB4OBU8N5XmnsycKpNjgAXtckrv+wwHsQybxGXJvk/+gJ7S+QPTfnAaJE9sICB87cTAisErWQ8rlJixRvQaGYO0ietosM0EfKKD2pBTPpMX9Xrd00qt3wlyMFcTVex18k1q2/0ncalXYF1ey4txN+2P39FA9OuxKBVjEN7C/OBX0FriX2Qr0XAEWxfQBw8gS3bLGHwFJLUqYUIgRew7QibAm4wy4l2xYftRpgUMJeBZGDunR9qU8thmagPCvE+uyIkoD5wE8QVezllYBu0+/IqAt7H+B60oTgUAS9gM73ru+KKJr6xU5d9xzV0N9Ot6nxmtVQ3zFseoZuZdrYwoKmWq8m65Ra8cYzzLrkKzJrsv+Dd2+2QmfV0k3HfqpIaulPu4pAZwUYq5kxH4AHvEnsp0lebAocSkYBviRzD2CEU/AjxjiLZh3EDbD0IgY0xzbUq/0wXMMLnmnPyN//UaqtC8TY3lTUj7+lIONUcU73jvZtZNtVFhjKO7AeHv9nNrGP1PsttpEGYh5zzemKy32plEUH/JenEvEcf8peIAa9lHdUTYW7eHGJXRIQ/5X2bMEJsNIlFA5lfRYxKhdpNO5BSESdyvwIZnWpZA8O4CFk6d5NhH8exvSclH/qMeke4iaFKSRV2/mSo03PCGvV8bCjWgILuJc/GGTT+nBfgvY9kbZxPT+vRIEmSwfrZ0NLS0vpf9A/cR0H3CHmB1AAAAABJRU5ErkJggg==", "reo_av_face_2": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAADy0aH/5B3BaU9mIRP63VHz1JH32W/94i3/5Rz/5hvWmnb/5B3kt43/5B3/5hn/5B3/5R2NUjrtx5ny0qHz0qKxf1710qHy0aHIeFvPhmX41aT84EF7OyiibE/boXvasojz0aHy0qH/46r//yCygV+ygWDMf2Dfp4DiroX/z5//6UP/5pkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADS8K2+AAAAgHRSTlMA/v7////+/v5PMP+N/7AUym3//2tO/y3V//8V//////+piwkI//////8QFwoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIhjcp0AAAM4SURBVHja7ZrbgpowEEBJNCFc5LJgUdd219Vur///fQUvKCEBMxP0oTmvKMdJZoaQ6HkOh8PhcDgcDofjaYRBHCdZQ5LEefgQZxrECZVJJpeHfemZLE4njDamQ0ymDukY1tXNxGb0Hqyqg4QaYC3NgoyaET9H2yQ4frjThIIIJ09jHTlumCl9ihnjxZhxXkqDh88vLsNStJdmB4g4w4tBnSSnNgifMdDH9YGxOLYjNg45tOQ1DlkXMJs6ZJ2Xi2kTW9ezOOHGIdsYaUYI8Scda3XzEIQAzDl6igUnJ7OYLK8PQ15CDDMM2bau3hqjqkpR7aPjrYNmkzyW+9XkExnem2rBtgKZXcFwuFc3E9LHfIYS53K/Ilo68uYH9ichhkbMyAhXOVMVOlQ86r0tbq4odKBYkDs56raKQk9gYn6v+KTj/bYag+qYkfvh27buGEycjhWSDnb5obeDnUMeEj4xw798wYeJM/MZVk24+ZtMDJjh3qhDVgK5ZqQX7zpP74oPeTq1aS2N9Mt8/nWh9PavcNiiS9k8onnNN5VXdaV9czMSn3Y+tt1bfW9u/6ISq64I0JI+V+XWF61YdYUhFtZWxGb7Agd74hDwWo4S+5CkPrcQSfypFX/qxZkH2PFhmHLyYZtOoapjmjSQi9h4M0LZqg1a5kUM2vRBPCMuYvNNkMSOOABtN1kQp6ANRYEWJ7AdxQHx4i1qWIysBCC7mc0ka+8azc780H5kC+gebQvRLrlmLdqYBXjjeGiROS7m0ICPIWvTenPxrouB3ILulCf67CpOuRVFxUBuJR706Ae5rg4Rhz8MUcWoYxgBDXkLH+iT2QeONPqU71WRWFIFFYUqtdCnix/yPX/WNXSjLurKivoB449yf8vxHst3sziFuYiUXUTYOEJeSk+HtnVEUdtGpJB9O4fmu+5d17M+3Vnmf+wcmP9dqUO+0g2YV7aO6qXMLjZd7Vqa4aW9/yZU8ipgo9fa9PYSrKnl41Pi7Vevhku7fwOp7m1ZS88y1eo53jrDduPa1eskf/RZjgVdelNRDmk/Xr3p2JdP0WoHfFXuvQdQlbsb+WpXVt4DqZZlzbLaew6Hw/G/8A8nHTlGf68SeAAAAABJRU5ErkJggg==", "reo_av_face_3": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAADTqoeWOyLBaU9mIRPKmHeqaEvHiGqRRi+VOSGVOiGVOiGVOiG3d1iVOiGVOR2VOSGVNxqlVzvVq4jEd1rUq4fUq4e0fWC9gmOVOh/QoX7Wq4TUqofTqod2NiSWNSGVW0SpXkLUsIWgTTLTq4fjqo6VKhWfQCCiLhexZDcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR8Z4oAAAAgHRSTlMA/v7///7///9QzXCs/pItMRX9MP9Nbf/8SP8QjtX/E///Fv+oCQwICxcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHnBsoIAAAM7SURBVHja7Zpr26IgEIaFQjygmaad990O7x7+/x9ctbRS0BggPyzPty69vBtgHodBx7GysrKysrKysrKymkoL3w/DOGYsCBiLw8VnoGGAe2LG4VsO9aYgXJrDJkLsLW5TYS/wmOIvzcjlNmYBfkeh1oll+H0Fvi6sH2A5seUk2EqJ+twyDJLqcC8CjKcgbzFcKqvbx3gSshoX460xmxoTzECXylwcgMCBOhg0zSHWoeUUA12bpzQ41gOW9s5EExfHmgJ2pcmShYHgKSfkmV3YIs8iiJrNZcFIuwjJk5fq5uGhShuTY83nEgQhy6Ty7yEuQuRiapKTQW4p19Akc16IKXoRST0T5tXPpgj1RN0O23NT1erLHxrm57ijF3h5Gz0pLeuw61cDIjRqh/1S/XYV7DocG+b+sD8cBkVwsN+1q3HdA63nhHrQRPbFy3kAnbZ3Ex1ggt6W295OgUO9kJrgh8rZXfcdRgL81XkvSJCbP+rB3hKwgCty9AgeAm5fiwgs2L4xlkol4UqTLzQbB6HdlBGu8d6VNagEWfBH2pvPf/DR/SuPXAZUmZ01vZ6X+snj8q7Aqj3Gcy23ejw3wXhXLqBdTMhbW3LgFLSXSNTBLqwLow+cALblSuAIsqjvFqIDHEA6Pq5KOkWwbkTCc0wZA2k2HNKdH65VS1hmAwY1fRTeEU0VIt8EYXrAW1C76aQCXgP7TYlMhSkowCAj7fwarrgIrUVGKgFIp54NVT50dtdKeEsKbWb6Q0X1rJXwFg/cph8qMsfBO3D3tgpZmE+rFiy6Y6NwLsEGVhe9azewtoAB1xsKCs4mD9qgvxWbYO/aqB7DQMEpxDueyRGMS3DwR+2oLeM9tZM43KWlfK554JjW6gm9KzOL9gNWP9Xcd59ZZ29j0oRyXSRV5zpOzgOXUZdJ3NpIJ+SNnq8Urq8zOuOos1/7q+fA/MwP+UmdgDNdR/WZ0Khvg96Z4VzftwlZrwoQY3VyedlMSF2DkF4SF3o/A8netazc0az9cRpuST6MY49nIx/6ZGNBF44pFUPYw94xp/NhEuzNuq+cuS2+nQ/onD/HfbwWmfM57bMsL4oiz74dKysrq/9F/wC2wTaq586fGAAAAABJRU5ErkJggg==", "reo_av_face_4": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAACufVZgNSmPWDVmIROWZkZ0SDWgbEZgNCldNCdgMyiNXEFeMyhgMyhfNClgNClfNClgNCmvfVZbNiWYYjyufVZfNClgNCmudlVfMyl9UDqufVZfMylhIyOugFVgMiKFSC+ufVawfFWufVZdLhexgE5VKipVORxmMxp6TiwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBUV1RAAAAgHRSTlMA/v7///7+/44uUP5OM85tsa5rGf9O7cYRjP/VbQsuF/+pK4sLDQwJChcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAElxTWoAAAMPSURBVHja7Zppe6IwEICTYCKXXIqCVlvtdo///wfXWmWVHJCZUD9s3q/08e1MhskFIR6Px+PxeDwej+dpRHHbFptPiiLMo29xLuO2YH3KfDGxdiFLr2zC/YTRhsxE+zrVyK7ZAOHSsfJ3GhbZoPai/uFQG5fMAmdlFm+YHaETbZoxazb4kd4XDMIam+6IQclxo8vgvDzJi4k5ZThiaFdmWGAV9or2sgw0a2R4MWsB3hfmAvtkL514WWEtDt2IrUOOHHlZ6ShgYW22XAdqpnxBrcWhk55FKbeep1xkOqAAc4RvHoJSgNlqrtAlGmK2qeu9yXtGTDXIS7OX0sDGvES1D0Ef2U4yLctvU0IlEinhW4FdA0lLHk6VcCG95gJV1rk5zY/yQDz+oUBMyrHUNszw24hvVa9bCxzjLR3DNcdcYQ5hEQs6kkTX3EqYmI5HdH/OgREvbAb40czlDhOCVrbUiqD7R4GzxNrQOMwDndyPuL04gwV8D2wnE9qWtLrS7FcCua5VzrWi/hMOmZ266amfvtlspkms/KQTA1aZvUwn51+fvSlrSvGk27lZiUuVOPj8eWW9qZ4I0JI+dyeGLKwDjPg2Y6V2p0x4cQDbw2zQ4gRS1IS0rsQZAZw0BZjXicOOuyLVnGjVQDhoiL92MQGFt8ybGHToE1AEHHQi8NW7BF6cWotzJ+L1L9CBMUqcwDJNfg4sQOYXjOsv4GlmaRLz4MrKuATJCPDQWB9Oh3HRlULERL9LHCsGBXwJWVtdq0ExBwdMSGHI9Xw+UF1byAnqv6MQjllXw2+VFyP3qOpM465h4Ov5gmBIE2imM+SlagMNGH27+C7Vc+8dOr9Z8k7HwVXuh7J3rB57pxSwiyvkWtO0Vpx3baQXMnfzqcBR1y21ffOPmwvzj92Qude/Tq6u6htto1bOjLW7bxMO+jlCnpAdeuUCM6xAKrefgRzGdo6aOOawe473XGHHYe2umeRDn3oo6IpMRWXSvjdkOprqKVptwnfV5NpLgVfHO/nuWJ3IN3KoqzP1qSEej8fzv/AXW7o0IyRq/PUAAAAASUVORK5CYII=", "reo_av_face_5": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAAB7Uj0KAgA9LiRtSTZSNikoGBEJAAAIAAA5IxkKAgAKAQAKAQBcQDFELCEKAAB7Uj17UTx7Uj11VDd7UDtCKR58Uj17Uj1gPy93SjI3IRZ5Tz2ATTOAUEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB1pmpfAAAAgHRSTlMA/v7//v7+TzD/jbDK//9ta07VES3/qYv/ERcqChAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJkr+D8AAALdSURBVHja7ZrZYuogEEABIUCIWTS17V3+/zev2qTGsERmoHm4nNfYHhmGgQwSUigUCoVCoVAoFHZDybo2zQ1j6k79jFTWhq0x2eXKlk40dU5vzUJkUyu2RZ1jYhv2CknV0rAIkqWZbFgc9T7aW4In8BoGQmVPYx8dLsyM7WLGeDFmnJcx+ePzi8wwtBe4qhq8GFRJOpYCtUeg7+eDxPtuviGrRN7oIfsGXOUess/LMye2r2ZxKqLNKSKtKY03qwTFg1KAucNPMacQs0GLJy+lPN8kB71XdCaxci0kuoTrLNuyvZre6BreWsVEV9jskqEwL9yispZ5hRJ3wTCv5Pp5vfEKUbvkRpi9cu1ablCxpq8wxZg7zEBxRV+kfXz6A1pB5GZeOSP++LgAjlhFTPDSfA23sCtMDapcNAo9f1EO3CW+/6iNE9P2bTnj8eImfoZdEx7/JlPHprRNBToJzKVLrMfhjYD1RIC2ReWOdOUNvv2Eww5dzpwW3kLmegJ7czOuKW690+56AjvSd3hxhThYa4xYw/oC6cQK8FqOEreQpJ5KSApxA+n4aMxyErCmk3JJYgrILFaQVoSm8JI5i0FNH00RCGATxOA2p1ksQe2mBGJYQxElbmGR/squwAnjeIeHzl/AbqYJicVhQgSPIA20aewd0OEb70fgjWPH0SdCzOF3IjKQXduhFohOuQlM8vG4kV0altJzsD/Aqwl1BaTgRVNgr2Hg53lDMEgBfYPB3vKdXf91e6+sGMHybmmva4gvGyCONcUTXOX+tb2Hh5oLZxWpUlwhDy7xzX3FU0ZEmnvri6doHXx1k/9KI/5zcg/5wfH5q42prurP637as1asZnhI99uEkfrVa21Kr5Vgt7U77RHWGu7T/gpkfLVkDSQxv0/7eAn5vGxrT59ZfugzbA26J7noQ9r3M8nHud9F6w34qc+uvS+t/rKQny79SH6QceivDOOZFAqFwv/CP9/uLaxMKHLoAAAAAElFTkSuQmCC", "reo_av_acc_1": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAAD09/nl6u7b4+jh6O3w9Pf9///n7PH1+PvV3eP+qTDz9/nz9/nz9vn0+Pr2lhTj5uz44b3a5ub8tEn4xnv1zZD17N3l5fXi6ezg5+3b29vU1P/d4+rf5+zb///jzKYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACtJkQqAAAAgHRSTlMA/f//l9IKri///0yTsm//Lv8U/////xNKcQcGJWAH/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJMsP8oAAAEaSURBVHja7daJkYMwDIVhZHwBhkCuTfZK/12uDWGWCsQk838NvJEtWa4qAAAAvKaYkt8h1vci4tSTP7+TSCPSK1d7s1akziWLXsl+6Ps+2CC1KcH2QyvXlThxrhx0FuxRJ7iT1XzSYu3dKwU32+BcudMZqiim3lY86zSSnZi5q6bzeTJ1U2ciUeeSTWnoNjNr7RrjfAu5r03zaA+HdtI869HmGRa5luDrGuxVgpdJvpxOl+dRq1xx9RWWsNJic5u5oDPI/j+3rAln7Y/SFt7klpkOWq91nPPW1yOXPGptiTy3ZY7DGqy2F9NzK7nl7UiKf61hiPdlmvNVx0rX73HsSs2p2oHvhmGPfyYAAAAAAAAAAAAAAACAt/EHMv0HKRrFEe4AAAAASUVORK5CYII=", "reo_av_acc_2": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAAD09/nl6u7b4+jh6O3w9Pf9///n7PH1+PvV3eP+qTDz9/nz9/nz9vn0+Pr2lhTj5uz44b3a5ub8tEn4xnv1zZD17N3l5fXi6ezg5+3b29vU1P/d4+rf5+zb///jzKYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACtJkQqAAAAgHRSTlMA/f//l9IKri///0yTsm//Lv8U/////xNKcQcGJWAH/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJMsP8oAAAEaSURBVHja7daJkYMwDIVhZHwBhkCuTfZK/12uDWGWCkRm8n8NvJEtWa4qAAAAvIKYkt8h1vci4tSTP7+TSCPSK1d7s1akziWLXsl+6Ps+2CC1KcH2QyvXlThxrhx0FuxRJ7iT1XzSYu3dKwU32+BcudMZqiim3lY86zSSnZi5q6bzeTJ1U2ciUeeSTWnoNjNr7RrjfAu5r03zaA+HdtI869HmGRa5luDrGuxVgpdJvpxOl+dRq1xx9RWWsNJic5u5oDPI/j+3rAln7Y/SFt7klpkOWq91nPPW1yOXPGptiTy3ZY7DGqy2F9NzK7nl7UiKf61hiPdlmvNVx0rX73HsSs2p2oHvhmGPfyYAAAAAAAAAAAAAAACAN/YHmNwHKST+gSQAAAAASUVORK5CYII=", "reo_av_acc_3": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAADz9vjzqrnl6u7pWW53sVX9/v7td4nxmanw9Pfd5Oni6O3rZXn+yk71+PrviJns19Xx9Pf8pSnwu8bzqrnm7O/z9viJtWfQOE/zq7n7uFLuyc/s2+L1+Pp2sVS0q4jMqZra5dr1q7vv48vj6e7l6e7k6+92slSyyKj7q7jzsLf19/ujr3nCJDvsbYD2lhP0qrn0qrrzqrny163j4+1tpkt2s1TbZnnZubPN3cviTWPwj6D5u3H3tZT4w3PwypJulEhll0dwrFJ4tlF4slZ2sVSXmmyGsVawtI631KrUrKHD2bz6s7f/zFf/zkv/ylH20pvq7vFbkDpVqlVqoENzrVJ8oWF2sVOAqlWfr3WNsGaezIW+wXy5y42s0Jqz06TCHTXKKUDaQVffcW3Sq57Zrabf6urf5+vf6Ozlg0Plgm3yp0jzp5j/qsb2tpn/tMP0uMb/y0v+xmD1yNXo0Nr109z66qoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZiBNXAAAAgHRSTlMA/P7+//4J///T/5T//zH//4///rOtr/7/kf/6/3CS/P76Lf8tSmlx/xH/Rv////9Ubs7/Ev9H///6//////b/yf8ME7nL////////FRE2uP/LuANj3v80Bv+xMv///kb/////y5UYQHj/////CbIRuE7VT23KMAAAAAAAAAAAAP1LUdIAAAOYSURBVHja7ZdncxpJEIbpmdnEBliyAIkokoKVLUuy5Jzj5Zxzzr//uhvBXV1dnbVg2R+un6pF1A7T73SYnlEqJQiC8L9i2LZfvOjPjx8uKKU2X7DsxlYYHitiY/rOXjwf/6PFlalh9PVyGI7UoVKFybsYwDsP5QjQsO/HHkD0Pbl69LXjGKW22jzcjUEDxOcgvKjRsFcEnYa4jboZ52LFBLSCwo921PM9Gofl5+9zzIaB5YcoFxhnzbiui19/pwGPh/3l5yb46GG7UNgc7hRhLEzPKw2Uc4PKJ4ExRo0AJiOeB6U/HtmbhYWN+Vwfbv4SPubi/c1nZ1l8cPUWvQoOKijsKAXp6ZJ0vRaGP3AChnPoPthSR2F4WWE8a1hUert6hNYvDd4gh00QkCqSZeWT6hOts0qFYfUf+yw51CHC8JtD4+Y5mtULuRPy+w7n2FWOoRSrRgtLrpO7kANQtM++VQGuaGEOYbLqfrqG9sdpPM7lOlTWmt7j45iMUs1bVwf3Nehcrgp1Gvhu7SKHovBgHmG0vWacPGZP67TezpJ+GvbVGMdVzd3d3QHlt7MNFGllAtxnHAnVnlW4gOt3TKXiODXQ06IGuHv7nprQsKzXL02GyOPDwHxkMuvrmTmi3WavDj7GTeNi4bD1Fn6WbljlsrVKo03Lunnd4zDQcI3emUq+ljHr2NXmKS7HmIMgk3FVLcvmi74fpa7dsJB3Pm++bVlLb6U8igetiJMfGCrFej4/+mm2zWwvs+66e1q8++yx36WxV5dQ8Vrq+tLSm9ROuY8/BeAcYymS+/U6zHZs2HGRWzI+XKTNK9S84n+1ZEf2Tnc5ZmEnk2dhTQUJK8kPBZybH9ePS8JXXtt7twT/feTav9LPRzXNlciFmFh4BSe1BuovMKd7z5zV/wx/mc/WYdJdwU5+/GK4yuXGvUaDdVcxp8+e1bdWm/ssmD0+oT/FLxJn2IO0bpWpeO+MWLd/lml9qwyT7tqhiusmv3HQqdC6jcJ34X7Zurl3tmn9D8YxRuEsZTr5+Wz7PvXB997HtlT0z56qD7GZp9O682Sbt30p+Xb6yju9cGjt9RJezqbdNZ28ulLdv81OFLAd3/embX0G4YglxyaiZEv2OVZPca63MkPn4jizjaTL3jnt6r1opl6NvavU6/VKM1yX+ZL95Uv4x8ouQeklyAqCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAiCIAjJ+ROVG0fj8u8kjAAAAABJRU5ErkJggg==", "reo_av_acc_4": "iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAMAAAAOusbgAAABgFBMVEUAAABPpOUcY5lEl9YoLjMbYpgUY5sbYpgbYpgseLIYY5gia6M5iccaYpgcXItPpOcbYphNpetPpOVPpecoLjJOo+RPpOUcWYgPWqQkJDAoLjImNkIiQ1wqergygb1EmNdNpOUXLi4eU30ZWIcnLDEoLjIiSGRAn/8fTXIPWpYXXpAcW4oA//8pLzEoMTclQFMhSmgkb6gkebYrfbgrerkqe7g5iMM2hcI/ldRHndxKnd4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAak8D8AAAAgHRSTlMA/v7+/nET0Iv+Lv7+UPtOsQ6wM8aMy5AJDIv//7H/sW4L/2Y2uv8IexFX2AFd/8JWyxUvcYGr3kGC0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANn0YGQAAAIdSURBVHja7ZiHVsJAEEWzk7LpgYigKGDvvev/f5ghAgYIKVvmHI9zf+DyZmZnNxgG8Ud4fh2NXp6QpVvJ9iTMGI8Qpd2DlBWYJF0UbbJk/eEr0a/ts3I+tcbupmwzHxonilXypsu7zWp4d3Roz1NWixdpaG+fNSCwlYvTJl5mgovd33mxFZuTht4sMqisdpc1JgDw8Qud1xo41uJYIgRQ1+Z+C3HWZGXFTlhbMccPzNhUDBF2h+dijjzSC7GKyOftvNODrCZyIiRWMNipmFj6LN8wMTFHnumFWLrWB6JiG7nFs+ME0JEUM1ExoN3Eq2Ifd7bMhThCXR8Fsa1kqM0FSOIJM8deAEsEnheaVS8QFeLHFWnBXi7/FUstTRsq8cI18ViJOIJaVt2eilLvQCM8s2RjSok70JBCbFAgjqAFs9i/p0l8gTjQjlwdKhC70JYgLMyW8K72QRJH92RtAj9wLPXo4uJeaz8Wf4FE4oHPLGuqHoiJY/HAd9aU/Qsh77F44MHtsNc7HZ5IB+a8XbsvZW7DPHB8du/Pz6Lj2w2Pl9ynyzXA0Z7V213ZoVFH39qYbelMu+bNL8o6t9x75yq2yr35r7K5rsDGIMt7elix1TbeH5J/BDxY1rCmGeVq6W/Tk8P6OSh7Byr8M7HqRbbWbNfAYnnGuWPgUZgzVG9hzrC9eWzbdW2DIAiCIAiCIAiCIAiCIAiCIAiC+Kd8A+F/ISBFO+RAAAAAAElFTkSuQmCC"}
 SOUNDS_B64 = {'reo_ukulele.ogg': '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', 'reo_pu.ogg': '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', 'reo_clochette.ogg': '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'}
 ICON_BG = r'''<?xml version="1.0" encoding="utf-8"?>
@@ -9272,6 +10692,7 @@ if tokens.exists():
 (UI / "ReoFenuaPhone.kt").write_text(PHONE_KT)
 (UI / "ReoFenuaVault.kt").write_text(VAULT_KT)
 (UI / "ReoFenuaStyle.kt").write_text(STYLE_KT)
+(UI / "ReoFenuaHome.kt").write_text(HOME_KT)
 import base64 as _b64
 raw = RES / "raw"
 raw.mkdir(parents=True, exist_ok=True)
@@ -9297,6 +10718,15 @@ if c.count(anchor3) == 1:
     print("Fond d'écran et boutons d'aide ajoutés.")
 else:
     warn("Emplacement du fond d'écran introuvable.")
+
+# Les messages commencent sous la pastille « Mode » pour ne jamais passer dessous
+anchor_pad = "                    top = statusBarHeight + headerHeight +\n                        (if (showNotesStrip) notesStripHeight else 0.dp),\n"
+if c.count(anchor_pad) == 1:
+    c = c.replace(anchor_pad,
+        "                    top = statusBarHeight + headerHeight + 70.dp +\n                        (if (showNotesStrip) notesStripHeight else 0.dp),\n")
+    print("Espace sous la pastille Mode ajouté.")
+else:
+    warn("Marge du haut de la liste des messages introuvable.")
 # Barre du bas (Radar · Proches · ALERTE · Aide · Plus), sous la case d'écriture
 anchor_bar = "          }\n        }\n\n        // Floating header"
 if c.count(anchor_bar) == 1:
@@ -9304,6 +10734,23 @@ if c.count(anchor_bar) == 1:
     print("Barre du bas ajoutée.")
 else:
     warn("Emplacement de la barre du bas introuvable.")
+# Réponses en un toucher, au-dessus de la case d'écriture
+anchor_qr = "        MessageInput(\n            value = messageText,\n"
+if c.count(anchor_qr) == 1:
+    c = c.replace(anchor_qr,
+        "        ReoFenuaQuickReplies(\n"
+        "            hasText = messageText.text.isNotBlank(),\n"
+        "            isPrivate = selectedPrivatePeer != null,\n"
+        "            conversationKey = (selectedPrivatePeer ?: \"\") + \"|\" + (currentChannel ?: \"\"),\n"
+        "            showMicHint = showMediaButtons,\n"
+        "            onSendText = { reoText ->\n"
+        "                onMessageTextChange(TextFieldValue(reoText))\n"
+        "                onSend()\n"
+        "            }\n"
+        "        )\n" + anchor_qr)
+    print("Réponses en un toucher ajoutées.")
+else:
+    warn("Emplacement des réponses en un toucher introuvable.")
 if c:
     chat.write_text(c)
 
@@ -9485,8 +10932,9 @@ new_status = """    androidx.compose.foundation.layout.Row(verticalAlignment = A
         )
         Text(
             text = reoFenuaStatusWord(status),
-            fontSize = 11.sp,
-            color = colorScheme.onSurfaceVariant,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = reoFenuaStatusColor(status, colorScheme.onSurfaceVariant),
             modifier = Modifier.padding(start = 3.dp)
         )
     }
@@ -9612,6 +11060,18 @@ if _m:
     print("Autorisations : doublons retirés.")
 else:
     warn("Autorisations : liste introuvable.")
+
+# Position « tout le temps » refusée dans la fenêtre d'Android : on s'en souvient,
+# pour ne pas redemander à chaque lancement (le réglage reste possible dans Android).
+t = onb.read_text() if onb.exists() else ""
+old_bg = """            Log.w(TAG, "Background location permission denied; continuing without it")
+"""
+if t.count(old_bg) == 1:
+    onb.write_text(t.replace(old_bg, old_bg +
+        "            BackgroundLocationPreferenceManager.setSkipped(activity, true)\n"))
+    print("Refus de la position en arrière-plan mémorisé.")
+else:
+    warn("Refus de la position en arrière-plan : emplacement introuvable.")
 
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
