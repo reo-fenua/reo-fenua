@@ -11433,6 +11433,161 @@ elif "stopScanning(force: Boolean" in t:
 else:
     warn("Correctif Bluetooth : emplacement introuvable.")
 
+# ---------- 7c-bis. Bluetooth fiable : le service Reo Fenua doit exister avant d'être visible ----------
+# Problème vu le 25 nov. 2026 : un téléphone diffusait sa présence mais son serveur n'avait pas
+# enregistré le service Reo Fenua. Les autres le voyaient sans pouvoir s'y connecter
+# (« Required service not found ») jusqu'au redémarrage du téléphone.
+_srv = pathlib.Path("app/src/main/java/com/bitchat/android/mesh/BluetoothGattServerManager.kt")
+t = _srv.read_text() if _srv.exists() else ""
+_SELF = "this@BluetoothGattServerManager.isActive"
+_srv_fix = [
+    # 1. État du service + surveillance
+    ("    private var isActive = false\n",
+     "    private var isActive = false\n\n"
+     "    // Reo Fenua : on ne se montre aux autres que si le service est vraiment enregistré\n"
+     "    @Volatile private var reoServiceReady = false\n"
+     "    private var reoServiceRetries = 0\n"
+     "    private var reoHealthJob: kotlinx.coroutines.Job? = null\n"
+     "    private val reoRebuildLock = kotlinx.coroutines.sync.Mutex()\n"),
+    # 2. Démarrage : construire le serveur, attendre le service, puis diffuser
+    ("        connectionScope.launch {\n"
+     "            setupGattServer()\n"
+     "            delay(300) // Brief delay to ensure GATT server is ready\n"
+     "            startAdvertising()\n"
+     "        }\n",
+     "        connectionScope.launch {\n"
+     "            reoServiceRetries = 0\n"
+     "            reoRebuildLock.lock()\n"
+     "            try { reoBuildServerAndAdvertise() } finally { reoRebuildLock.unlock() }\n"
+     "            reoStartHealthCheck()\n"
+     "        }\n"),
+    # 3. Arrêt : couper la surveillance
+    ("    fun stop() {\n",
+     "    fun stop() {\n"
+     "        reoHealthJob?.cancel()\n"
+     "        reoHealthJob = null\n"
+     "        reoServiceReady = false\n"),
+    # 4. Résultat de l'ajout du service
+    ("                if (status != BluetoothGatt.GATT_SUCCESS) {\n"
+     "                    Log.e(TAG, \"Server: Failed to add service: ${service.uuid}, status: $status\")\n"
+     "                }\n",
+     "                if (status != BluetoothGatt.GATT_SUCCESS) {\n"
+     "                    Log.e(TAG, \"Server: Failed to add service: ${service.uuid}, status: $status\")\n"
+     "                } else if (service.uuid == AppConstants.Mesh.Gatt.SERVICE_UUID) {\n"
+     "                    reoServiceReady = true\n"
+     "                    Log.i(TAG, \"Server: Reo Fenua service added\")\n"
+     "                }\n"),
+    # 5. Ne jamais diffuser sans service
+    ("        if (!enabled) {\n"
+     "            Log.d(TAG, \"Not starting advertising: GATT Server disabled via debug settings\")\n",
+     "        if (!reoServiceReady) {\n"
+     "            Log.w(TAG, \"Not starting advertising: Reo Fenua service not ready\")\n"
+     "            return\n"
+     "        }\n"
+     "        if (!enabled) {\n"
+     "            Log.d(TAG, \"Not starting advertising: GATT Server disabled via debug settings\")\n"),
+    # 6. Fonctions de reconstruction et de surveillance
+    ("    /**\n     * Start advertising\n     */\n",
+     "    /** Reo Fenua : crée le serveur, attend le service (3 s max), puis diffuse. Sinon recommence. */\n"
+     "    private suspend fun reoBuildServerAndAdvertise() {\n"
+     "        while (isActive) {\n"
+     "            reoServiceReady = false\n"
+     "            stopAdvertising()\n"
+     "            try { setupGattServer() } catch (e: Exception) { Log.e(TAG, \"Reo Fenua: GATT server setup error: ${e.message}\") }\n"
+     "            var waited = 0\n"
+     "            while (isActive && !reoServiceReady && waited < 3000) { delay(100); waited += 100 }\n"
+     "            if (!isActive) return\n"
+     "            if (!reoServiceReady) {\n"
+     "                reoServiceReady = try { gattServer?.getService(AppConstants.Mesh.Gatt.SERVICE_UUID) != null } catch (_: Exception) { false }\n"
+     "            }\n"
+     "            if (reoServiceReady) {\n"
+     "                Log.i(TAG, \"Reo Fenua: GATT service ready, advertising\")\n"
+     "                startAdvertising()\n"
+     "                return\n"
+     "            }\n"
+     "            reoServiceRetries++\n"
+     "            if (reoServiceRetries > 5) {\n"
+     "                Log.e(TAG, \"Reo Fenua: GATT service still missing after 5 attempts, next check in 30 s\")\n"
+     "                return\n"
+     "            }\n"
+     "            Log.e(TAG, \"Reo Fenua: GATT service not added (attempt $reoServiceRetries), rebuilding server\")\n"
+     "            delay(1000L * reoServiceRetries)\n"
+     "        }\n"
+     "    }\n\n"
+     "    /** Reo Fenua : toutes les 30 s, vérifie que le service existe toujours, sinon reconstruit. */\n"
+     "    private fun reoStartHealthCheck() {\n"
+     "        reoHealthJob?.cancel()\n"
+     "        reoHealthJob = connectionScope.launch {\n"
+     "            while (" + _SELF + ") {\n"
+     "                delay(30_000)\n"
+     "                if (!" + _SELF + " || !isServerRoleEnabled()) continue\n"
+     "                val ok = reoServiceReady && try { gattServer?.getService(AppConstants.Mesh.Gatt.SERVICE_UUID) != null } catch (_: Exception) { false }\n"
+     "                if (!ok && reoRebuildLock.tryLock()) {\n"
+     "                    try {\n"
+     "                        Log.w(TAG, \"Reo Fenua: GATT service missing, restarting server\")\n"
+     "                        reoServiceRetries = 0\n"
+     "                        reoBuildServerAndAdvertise()\n"
+     "                    } finally { reoRebuildLock.unlock() }\n"
+     "                }\n"
+     "            }\n"
+     "        }\n"
+     "    }\n\n"
+     "    /**\n     * Start advertising\n     */\n"),
+]
+if "reoServiceReady" in t:
+    print("Bluetooth fiable (serveur) : déjà présent.")
+elif t and all(t.count(a) == 1 for a, _ in _srv_fix):
+    for a, b in _srv_fix:
+        t = t.replace(a, b)
+    _srv.write_text(t)
+    print("Bluetooth fiable : le téléphone ne se montre que si son service est prêt, et se répare seul.")
+else:
+    warn("Bluetooth fiable (serveur) : emplacement introuvable : " +
+         ", ".join(str(i + 1) for i, (a, _) in enumerate(_srv_fix) if t.count(a) != 1))
+
+_cli = pathlib.Path("app/src/main/java/com/bitchat/android/mesh/BluetoothGattClientManager.kt")
+t = _cli.read_text() if _cli.exists() else ""
+_cli_fix = [
+    ("        val gattCallback = object : BluetoothGattCallback() {\n",
+     "        val gattCallback = object : BluetoothGattCallback() {\n"
+     "            // Reo Fenua : une seconde recherche des services, cache vidé, avant d'abandonner\n"
+     "            private var reoRetriedDiscovery = false\n\n"),
+    ("                    // Start service discovery only AFTER MTU is set.\n"
+     "                    gatt.discoverServices()\n",
+     "                    // Start service discovery only AFTER MTU is set (Reo Fenua : petit délai, plus fiable).\n"
+     "                    connectionScope.launch {\n"
+     "                        delay(300)\n"
+     "                        try { gatt.discoverServices() } catch (_: Exception) { gatt.disconnect() }\n"
+     "                    }\n"),
+    ("                    } else {\n"
+     "                        Log.e(TAG, \"Client: Required service not found for $deviceAddress\")\n"
+     "                        gatt.disconnect()\n"
+     "                    }\n",
+     "                    } else if (!reoRetriedDiscovery) {\n"
+     "                        reoRetriedDiscovery = true\n"
+     "                        Log.w(TAG, \"Client: Service not found for $deviceAddress, clearing GATT cache and retrying\")\n"
+     "                        try { gatt.javaClass.getMethod(\"refresh\").invoke(gatt) } catch (_: Exception) { }\n"
+     "                        connectionScope.launch {\n"
+     "                            delay(600)\n"
+     "                            val started = try { gatt.discoverServices() } catch (_: Exception) { false }\n"
+     "                            if (!started) gatt.disconnect()\n"
+     "                        }\n"
+     "                    } else {\n"
+     "                        Log.e(TAG, \"Client: Required service not found for $deviceAddress\")\n"
+     "                        gatt.disconnect()\n"
+     "                    }\n"),
+]
+if "reoRetriedDiscovery" in t:
+    print("Bluetooth fiable (client) : déjà présent.")
+elif t and all(t.count(a) == 1 for a, _ in _cli_fix):
+    for a, b in _cli_fix:
+        t = t.replace(a, b)
+    _cli.write_text(t)
+    print("Bluetooth fiable : nouvelle recherche des services, cache vidé, avant d'abandonner.")
+else:
+    warn("Bluetooth fiable (client) : emplacement introuvable : " +
+         ", ".join(str(i + 1) for i, (a, _) in enumerate(_cli_fix) if t.count(a) != 1))
+
 # ---------- 7d. Diagnostic : messages Bluetooth recopiés dans la console de debug ----------
 _MESH = pathlib.Path("app/src/main/java/com/bitchat/android/mesh")
 _diag_n = 0
