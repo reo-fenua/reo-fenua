@@ -5112,6 +5112,37 @@ fun ReoFenuaMsgDeleteHost(viewModel: ChatViewModel) {
         }
     }
 }
+
+
+// ===================== Par où est passé un message privé =====================
+
+/** Route choisie à l'envoi : true = internet (Nostr), false = de proche en proche (Bluetooth ou Wi-Fi direct). En mémoire seulement. */
+object ReoFenuaRoute {
+    val sent = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+    fun mark(id: String, internet: Boolean) {
+        try { sent[id] = internet } catch (_: Exception) { }
+    }
+}
+
+/** Petite mention sous un message privé : « 📶 internet » ou « 📡 sans internet » (Bluetooth ou Wi-Fi direct, de proche en proche). */
+@Composable
+fun ReoFenuaRouteTag(message: com.bitchat.android.model.BitchatMessage?) {
+    val m = message ?: return
+    if (!m.isPrivate || m.sender == "system") return
+    val internet: Boolean? = when {
+        m.senderNostrPubkey != null -> true
+        ReoFenuaRoute.sent[m.id] != null -> ReoFenuaRoute.sent[m.id]
+        m.deliveryStatus == null -> false
+        else -> null
+    }
+    if (internet == null) return
+    Text(
+        text = if (internet) "📶 internet" else "📡 sans internet",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp)
+    )
+}
 '''
 NETWORK_KT = r'''package com.bitchat.android.ui
 
@@ -11982,6 +12013,59 @@ if t.count(_a) == 1:
     print("Suppression d'un message : ajoutée au menu de l'appui long.")
 else:
     warn("Suppression d'un message : menu de l'appui long introuvable.")
+
+# ---------- 8b. Par où est passé un message privé : 📶 internet ou 📡 sans internet ----------
+# Envoyés : on note la route choisie par MessageRouter (en mémoire seulement).
+# Reçus : « senderNostrPubkey » présent = arrivé par internet ; sinon par Bluetooth.
+_rt = pathlib.Path("app/src/main/java/com/bitchat/android/services/MessageRouter.kt")
+t = _rt.read_text() if _rt.exists() else ""
+if "ReoFenuaRoute.mark" in t:
+    print("Route des messages : déjà présente (MessageRouter).")
+elif t.count("return RouteResult.MESH\n") == 1 and t.count("return RouteResult.NOSTR\n") == 2:
+    t = re.sub(r"\n([ \t]*)return RouteResult\.MESH\n",
+               lambda m: "\n" + m.group(1) + "com.bitchat.android.ui.ReoFenuaRoute.mark(messageID, false)\n" + m.group(1) + "return RouteResult.MESH\n", t)
+    t = re.sub(r"\n([ \t]*)return RouteResult\.NOSTR\n",
+               lambda m: "\n" + m.group(1) + "com.bitchat.android.ui.ReoFenuaRoute.mark(messageID, true)\n" + m.group(1) + "return RouteResult.NOSTR\n", t)
+    _rt.write_text(t)
+    print("Route des messages : notée à l'envoi.")
+else:
+    warn("Route des messages : MessageRouter introuvable.")
+
+_mc = UI / "MessageComponents.kt"
+t = _mc.read_text() if _mc.exists() else ""
+_rx = [
+    # Reçu par Bluetooth (pas de statut) : petite mention dans la bulle
+    ("                                    message.deliveryStatus?.let { status ->\n"
+     "                                        Spacer(Modifier.width(4.dp))\n"
+     "                                        DeliveryStatusIcon(status = status)\n"
+     "                                    }\n",
+     "                                    message.deliveryStatus?.let { status ->\n"
+     "                                        Spacer(Modifier.width(4.dp))\n"
+     "                                        DeliveryStatusIcon(status = status)\n"
+     "                                    }\n"
+     "                                    if (message.deliveryStatus == null) ReoFenuaRouteTag(message)\n"),
+    ("fun DeliveryStatusIcon(status: DeliveryStatus) {\n",
+     "fun DeliveryStatusIcon(status: DeliveryStatus, reoMessage: com.bitchat.android.model.BitchatMessage? = null) {\n"),
+    ("            color = reoFenuaStatusColor(status, colorScheme.onSurfaceVariant),\n"
+     "            modifier = Modifier.padding(start = 3.dp)\n"
+     "        )\n",
+     "            color = reoFenuaStatusColor(status, colorScheme.onSurfaceVariant),\n"
+     "            modifier = Modifier.padding(start = 3.dp)\n"
+     "        )\n"
+     "        ReoFenuaRouteTag(reoMessage)\n"),
+]
+if "ReoFenuaRouteTag" in t:
+    print("Route des messages : déjà affichée.")
+elif t and all(t.count(a) == 1 for a, _ in _rx) and t.count("DeliveryStatusIcon(status = status)") == 3:
+    for a, b in _rx:
+        t = t.replace(a, b)
+    t = t.replace("DeliveryStatusIcon(status = status)", "DeliveryStatusIcon(status = status, reoMessage = message)")
+    _mc.write_text(t)
+    print("Route des messages : 📶 internet ou 📡 sans internet sous les messages privés.")
+else:
+    warn("Route des messages : affichage introuvable : " +
+         ", ".join(str(i + 1) for i, (a, _) in enumerate(_rx) if t.count(a) != 1) +
+         " / appels : %d" % t.count("DeliveryStatusIcon(status = status)"))
 
 # ---------- 8. Sécurité : images reçues floues, signaler, pas de « gifle » ----------
 imf = UI / "media" / "ImageMessageItem.kt"
